@@ -1,0 +1,39 @@
+{
+  "last_updated": "2026-04-29T11:54:02.652584",
+  "activities": [
+    {
+      "index": 0,
+      "date": "2026-04-26 10:59:35",
+      "activity_type": "strength_training",
+      "primary_metric": "BENCH_PRESS, PUSH_UP, PULL_UP, UNKNOWN, ROW",
+      "duration": 4210.591796875,
+      "calories": 225.0
+    },
+    {
+      "index": 1,
+      "date": "2026-04-23 11:37:32",
+      "activity_type": "running",
+      "primary_metric": "3.0999999046325684",
+      "duration": 2035.467041015625,
+      "calories": 432.0,
+      "distance": 6754.0400390625
+    },
+    {
+      "index": 2,
+      "date": "2026-04-23 10:45:29",
+      "activity_type": "cycling",
+      "primary_metric": "0.5",
+      "duration": 436.81500244140625,
+      "calories": 62.0,
+      "distance": 2204.7099609375
+    },
+    {
+      "index": 3,
+      "date": "2026-04-19 05:30:31",
+      "activity_type": "strength_training",
+      "primary_metric": "BENCH_PRESS, PUSH_UP, PULL_UP, UNKNOWN",
+      "duration": 3715.873046875,
+      "calories": 335.0
+    }
+  ]
+}
