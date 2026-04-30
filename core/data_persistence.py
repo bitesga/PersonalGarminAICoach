@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 import json
 from pathlib import Path
+import re
 from typing import Any
 
 
@@ -15,10 +16,23 @@ def _ensure_data_dir() -> Path:
     return data_dir
 
 
-def save_daily_stats(data: dict[str, Any]) -> Path:
-    """Save 7-day daily stats to JSON file."""
+def _safe_user_segment(user_id: str) -> str:
+    """Create a filesystem-safe user segment from Discord ID."""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", str(user_id).strip())
+
+
+def _resolve_file(filename: str, user_id: str | None = None) -> Path:
     data_dir = _ensure_data_dir()
-    filename = data_dir / "daily_stats.json"
+    if not user_id:
+        return data_dir / filename
+    user_dir = data_dir / "users" / _safe_user_segment(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return user_dir / filename
+
+
+def save_daily_stats(data: dict[str, Any], user_id: str | None = None) -> Path:
+    """Save 7-day daily stats to JSON file."""
+    filename = _resolve_file("daily_stats.json", user_id=user_id)
     
     # Preserve existing data and append/update
     existing = {}
@@ -36,10 +50,9 @@ def save_daily_stats(data: dict[str, Any]) -> Path:
     return filename
 
 
-def save_activities(data: list[dict[str, Any]]) -> Path:
+def save_activities(data: list[dict[str, Any]], user_id: str | None = None) -> Path:
     """Save 7-activity history to JSON file."""
-    data_dir = _ensure_data_dir()
-    filename = data_dir / "activities.json"
+    filename = _resolve_file("activities.json", user_id=user_id)
     
     output = {
         "last_updated": datetime.now().isoformat(),
@@ -51,10 +64,9 @@ def save_activities(data: list[dict[str, Any]]) -> Path:
     return filename
 
 
-def load_daily_stats() -> dict[str, Any]:
+def load_daily_stats(user_id: str | None = None) -> dict[str, Any]:
     """Load existing daily stats from JSON file."""
-    data_dir = _ensure_data_dir()
-    filename = data_dir / "daily_stats.json"
+    filename = _resolve_file("daily_stats.json", user_id=user_id)
     
     if not filename.exists():
         return {}
@@ -65,10 +77,9 @@ def load_daily_stats() -> dict[str, Any]:
         return {}
 
 
-def load_activities() -> list[dict[str, Any]]:
+def load_activities(user_id: str | None = None) -> list[dict[str, Any]]:
     """Load existing activities from JSON file."""
-    data_dir = _ensure_data_dir()
-    filename = data_dir / "activities.json"
+    filename = _resolve_file("activities.json", user_id=user_id)
     
     if not filename.exists():
         return []
@@ -80,10 +91,9 @@ def load_activities() -> list[dict[str, Any]]:
         return []
 
 
-def save_user_profile(profile: dict[str, Any]) -> Path:
+def save_user_profile(profile: dict[str, Any], user_id: str | None = None) -> Path:
     """Save the dashboard user profile and preferences to JSON."""
-    data_dir = _ensure_data_dir()
-    filename = data_dir / "user_profile.json"
+    filename = _resolve_file("user_profile.json", user_id=user_id)
     output = {
         "last_updated": datetime.now().isoformat(),
         "profile": profile,
@@ -92,10 +102,9 @@ def save_user_profile(profile: dict[str, Any]) -> Path:
     return filename
 
 
-def load_user_profile() -> dict[str, Any]:
+def load_user_profile(user_id: str | None = None) -> dict[str, Any]:
     """Load the persisted user profile and preferences."""
-    data_dir = _ensure_data_dir()
-    filename = data_dir / "user_profile.json"
+    filename = _resolve_file("user_profile.json", user_id=user_id)
 
     if not filename.exists():
         return {}

@@ -94,6 +94,21 @@ def send_discord_dm(message: str, user_id: str) -> tuple[bool, str]:
         return False, f"Discord-Versand fehlgeschlagen: {exc}"
 
 
+def send_verification_dm(user_id: str, code: str, invite_link: str | None = None) -> tuple[bool, str]:
+    """Send a short verification DM containing the code and optional server invite instructions."""
+    if not user_id:
+        return False, "Discord User-ID fehlt."
+    try:
+        message = (
+            f"Dein Verifizierungs-Code: {code}\n\n"
+            "Gib diesen Code in der App ein, um deinen Account zu verifizieren."
+            "Hinweis: Der Bot sendet dir nur diesen Code und eine kurze Anleitung."
+        )
+        return send_discord_dm(message, user_id)
+    except Exception as exc:
+        return False, f"Fehler beim Senden des Verifizierungs-Codes: {exc}"
+
+
 def notify_recommendation(
     recommendation: dict[str, Any],
     profile: dict[str, Any],

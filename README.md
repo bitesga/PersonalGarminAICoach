@@ -2,52 +2,125 @@
 Ein autonomer Python-Agent, der Garmin-Fitnessdaten in Echtzeit analysiert und darauf basierend eine adaptive Trainingsplanung erstellt. Anstatt einem starren Plan zu folgen, reagiert die KI dynamisch auf tatsächliche körperliche Verfassung und letzte Performance. Ein Dashboard zur Konfiguration von Präferenzen und Einrichtung weiterer Nutzer wird aufgebaut.
 
 **Technischer Stand**
-- **Sprache & Bibliotheken:** Python; `garminconnect`, `python-dotenv` und `groq` sind eingetragen in `requirements.txt`.
-- **Authentifizierung:** Lädt `GARMIN_EMAIL` / `GARMIN_PASSWORD` aus dem Repo-Root `.env` (Pfad-Handling in `core/fetch_garmin_data.py`).
-- **Datenbeschaffung:** Holt neueste Aktivitäten (`get_activities`), Tages-Stats (`get_stats`) und bei Bedarf Schlafdaten (`get_sleep_data`) über `python-garminconnect`.
-- **Extrahierte Kennzahlen:** Body Battery, Sleep Score (priorisiert `dailySleepDTO.sleepScores.overall.value`), durchschnittlicher Stress, VO2Max (bevorzugt aus Benutzerprofil `userData.vo2MaxRunning`), Ruhepuls.
-- **Aktivitätsverarbeitung:** Für Ausdaueraktivitäten wird der Training Effect verwendet; für Kraft/Strength-Aktivitäten werden `summarizedExerciseSets`-Kategorien extrahiert und `distance` weggelassen.
-- **Fehlerbehandlung & Robustheit:** Spezielle Behandlung für Authentifizierungs- und Verbindungsfehler; Exponential-Backoff für Garmin-Rate-Limits (HTTP 429) implementiert.
-- **Persistenz:** Speichert die letzten 7 Tage in `data/daily_stats.json` und die letzten 7 Aktivitäten in `data/activities.json` via `core/data_persistence.py`.
-- **Coach-Logic:** `core/coach_agent.py` baut aus den JSON-Daten den Coach-Prompt und nutzt Groq (`GROQ_CLOUD_KEY`) für die Empfehlung.
-- **Coach-Lauf:** `core/coach_agent.py --run-model` nutzt Groq mit kompaktem JSON-Output; falls das Modell keine sauber parsebare Antwort liefert oder der Output zu allgemein ist, greift eine konkrete datenbasierte Fallback-Empfehlung.
-- **Coach-Cache:** Empfehlungen werden 6 Stunden zwischengespeichert; ohne `--refresh` wird innerhalb dieses Fensters einfach die letzte Empfehlung geladen statt einen neuen Prompt zu senden.
-- **Ausgabeformat:** Für Discord/Streamlit gibt es jetzt eine kompakte, gut lesbare Markdown-Ausgabe mit Titel, Intensität, Empfehlung, Begründung und Quelle.
-- **Benachrichtigung:** Neue Modell-Empfehlungen (`source=model`) können optional per Discord-DM versendet werden.
-- **Streamlit-Dashboard:** Der Ordner `web/` enthält den Dashboard-Startpunkt mit Datenansicht, Präferenzen und Coach-Empfehlung.
-- **Aufräumen:** Entwicklungs-Debug-Ausgaben/Helper entfernt; Produktionslauf entspricht jetzt schlanker Ausgabe + JSON-Persistenz.
+- **Sprache & Bibliotheken:** Python; `garminconnect`, `python-dotenv`, `groq` und `streamlit` sind eingetragen in `requirements.txt`.
+- **Authentifizierung:** 
+  - Garmin: Lädt `GARMIN_EMAIL` / `GARMIN_PASSWORD` aus dem Repo-Root `.env`.
+  - Discord: Verwendet `DISCORD_BOT_TOKEN` für DM-Versand und Server-Invite über `DISCORD_SERVER_INVITE`.
+  - Coach LLM: `GROQ_CLOUD_KEY` für Groq-Modell.
+- **User Management:**
+  - Discord-basierte Registrierung und Verifikation (`core/user_management.py`).
+  - Benutzer registrieren sich mit ihrer Discord-ID; ein 6-stelliger Verifikations-Code wird per DM gesendet.
+  - Nach erfolgreicher Verifikation erhalten Nutzer Zugang zum Dashboard.
+  - Benutzerprofile werden in `data/users.json` mit Locking persistent gespeichert.
+- **Datenbeschaffung:**
+  - Holt neueste Aktivitäten, Tages-Stats und Schlafdaten über `python-garminconnect`.
+  - Alternative: Manuelle Eingabe von Gesundheitsdaten (Sleep Score, Body Battery, Stress, VO2Max, Resting HR) und Aktivitäten über das Dashboard.
+  - Garmin OAuth ist als Stub vorbereitet (`core/data_entry.py`); künftige Implementierung für automatische Synchronisation geplant.
+- **Extrahierte Kennzahlen:** Body Battery, Sleep Score, durchschnittlicher Stress, VO2Max, Ruhepuls.
+- **Coach-Logic:**
+  - `core/coach_agent.py` baut aus JSON-Daten einen Prompt und nutzt Groq für die Empfehlung.
+  - Deterministische Fallback-Empfehlung mit Sicherheit (z.B. "Ruhetag" bei Body Battery < 35).
+  - Prompt berücksichtigt Trainingsziel (Kraft Fokus, Ausdauer Fokus, Marathon, etc.) und erzwingt konkrete Empfehlungen (keine Wochenpläne).
+  - Recovery-Schutz: Body Battery < 50 oder Sleep Score < 60 triggern Low-Intensity-Recommendations.
+  - Intensity-Baseline: Zielabhängig (z.B. Kraft Fokus → 9/10, Ausdauer → 6–8/10).
+- **Coach-Cache:** Empfehlungen werden 6 Stunden zwischengespeichert; `--refresh` erzwingt neue Anfrage.
+- **Benachrichtigung:** Neue Modell-Empfehlungen können per Discord-DM versendet werden (optional pro Nutzer).
+- **Streamlit-Dashboard:**
+  - **Verifikations-Gate:** Benutzer müssen sich mit Discord-ID registrieren und Code verifizieren.
+  - **Dashboard-Tab:** Fitnessdaten, Coach-Empfehlung mit Intensität/Begründung, letzte Aktivitäten.
+  - **Datenquellen-Tab:** Garmin OAuth-Setup (Stub) und manuelle Daten-/Aktivitäten-Eingabeformulare.
+  - Session-basierte Profil-Verwaltung (Mobilität, Trainingsziel, Sonstige Aspekte).
+  - Discord DM-Optionen konfigurierbar im Sidebar.
+- **Persistent Storage:**
+  - `data/users.json` - Benutzer und Verifikationsstatus.
+  - `data/daily_stats.json` - Letzte 7 Tage Fitnessdaten.
+  - `data/activities.json` - Letzte 7 Aktivitäten.
+  - `data/user_profile.json` - Dashboard-Präferenzen (pro Anmeldung).
+
+**Umgebungsvariablen (.env)**
+```env
+# Garmin-Daten
+GARMIN_EMAIL=your_email@example.com
+GARMIN_PASSWORD=your_password
+
+# Groq LLM (Coach-Engine)
+GROQ_CLOUD_KEY=your_groq_api_key
+
+# Discord (Verifikation & Benachrichtigungen)
+DISCORD_BOT_TOKEN=your_bot_token_here
+DISCORD_SERVER_INVITE=https://discord.gg/YOUR_SERVER_CODE
+
+# Optional: Garmin OAuth (Zukunft)
+# GARMIN_CLIENT_ID=your_client_id
+# GARMIN_REDIRECT_URI=http://localhost:8501/callback
+```
 
 **Schnellstart**
-- `.env` im Repo-Root mit `GARMIN_EMAIL` und `GARMIN_PASSWORD` anlegen.
-- Für den Coach-Agenten: `GROQ_CLOUD_KEY` in `.env` hinterlegen.
-- Coach direkt starten:
 
+1. **Abhängigkeiten installieren:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **.env im Repo-Root anlegen** mit Garmin-Credentials, `GROQ_CLOUD_KEY` und `DISCORD_BOT_TOKEN`.
+
+3. **Streamlit-Dashboard starten:**
+   ```bash
+   streamlit run web/app.py
+   ```
+
+4. **Registrieren & Verifizieren:**
+   - Discord-ID eingeben.
+   - "Registrieren & Code senden" klicken → Code kommt per Discord DM.
+   - Code eingeben und verifizieren.
+   - Nach erfolgreichem Login: Dashboard und Datenquellen-Optionen verfügbar.
+
+5. **Daten eintragen:**
+   - **Garmin:** "Garmin-Daten neu laden" im Sidebar oder über den Datenquellen-Tab.
+   - **Manuell:** Im Datenquellen-Tab können Gesundheitsdaten und Aktivitäten manuell eingetragen werden.
+
+6. **(Optional) Coach direkt aufrufen:**
+   ```bash
+   python core/coach_agent.py --run-model
+   ```
+
+**Tests**
+
+Unit-Tests für Registrierung und Verifikation:
 ```bash
-python core/coach_agent.py --run-model
+python tests/test_user_management.py
 ```
 
-- Cache bewusst erneuern:
+**Architektur**
 
-```bash
-python core/coach_agent.py --run-model --refresh
+```
+PersonalGarminAICoach/
+├── core/
+│   ├── coach_agent.py          # Coach-Logic, LLM-Integration, Fallbacks
+│   ├── fetch_garmin_data.py    # Garmin-Daten abrufen
+│   ├── data_persistence.py     # JSON-Speicherung
+│   ├── user_management.py      # Registrierung, Verifikation, User-Store
+│   ├── notification_service.py # Discord DM-Versand
+│   └── data_entry.py           # Garmin OAuth Stubs, manuelle Eingabeformulare
+├── web/
+│   └── app.py                  # Streamlit Dashboard
+├── data/
+│   ├── users.json              # Benutzerprofile
+│   ├── daily_stats.json        # Tägliche Fitnessdaten
+│   ├── activities.json         # Aktivitäten
+│   └── user_profile.json       # Dashboard-Präferenzen
+├── tests/
+│   └── test_user_management.py # Unit-Tests
+├── requirements.txt            # Abhängigkeiten
+└── README.md                   # Diese Datei
 ```
 
-- Streamlit-Dashboard starten:
+**Hinweise**
 
-```bash
-streamlit run web/app.py
-```
-
-- Abhängigkeiten installieren:
-
-```bash
-pip install -r requirements.txt
-```
-
-- Script ausführen:
-
-```bash
-python core/fetch_garmin_data.py
+- Die Verifikation ist Discord-basiert: Ein Bot muss eingeladen werden und darf DMs senden.
+- Garmin OAuth ist momentan ein Stub und wird künftig implementiert.
+- Manuelle Dateneinträge überschreiben nicht automatisch Garmin-Daten; beide Quellen können parallel genutzt werden.
+- Der Coach bevorzugt Groq LLM; ohne `GROQ_CLOUD_KEY` greift das System auf deterministische Fallbacks zurück.
 ```
 
 **Hinweis:** Häufige Aufrufe können von Garmin ip-basierend rate-limited werden; das Skript verwendet Backoff, aber vermeiden Sie zu häufige Ausführungen.

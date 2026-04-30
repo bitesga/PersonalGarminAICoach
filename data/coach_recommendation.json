@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-04-30T18:48:14.321503",
+  "generated_at": "2026-04-30T20:02:52.741533",
   "recommendation": {
-    "titel": "Ausdauer-Erholung",
-    "empfehlung": "Heute: 30-40 Min lockerer Dauerlauf in Zone 2 oder 45 Min lockeres Radfahren. Alternative: 25 Min zuegiges Gehen plus 10 Min Mobility.",
-    "intensitaet": 3,
-    "begruendung": "Das Ausdauerziel bleibt wichtig, aber deine Erholung spricht fuer einen lockeren Reiz (Sleep 80.0, Body Battery 31.0).",
+    "titel": "Ruhetag",
+    "empfehlung": "Heute bitte gar kein Training mehr — ruhe dich aus; versuche es morgen wieder. Wenn du dich bewegen moechtest: 20-30 Min sehr lockeres Gehen oder Mobility. Alternative: 15-20 Min Atem- und Mobilitaetsroutine.",
+    "intensitaet": 1,
+    "begruendung": "Deine Body Battery ist sehr niedrig (31.0). Deshalb empfehle ich heute keinen Trainingsreiz und priorisiere Ruhe und Regeneration.",
     "source": "model",
     "model_attempt": 1
   }

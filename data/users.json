@@ -1,0 +1,89 @@
+{
+  "test_discord_0001": {
+    "discord_id": "test_discord_0001",
+    "verified": true,
+    "created_at": "2026-04-30T17:21:26.036016",
+    "verified_at": "2026-04-30T17:21:26.046460",
+    "garmin_connected": false,
+    "profile": {}
+  },
+  "test_register_001": {
+    "discord_id": "test_register_001",
+    "verified": false,
+    "verification_code": "945346",
+    "created_at": "2026-04-30T17:39:41.561742",
+    "verified_at": null,
+    "garmin_connected": false,
+    "profile": {}
+  },
+  "test_existing_001": {
+    "discord_id": "test_existing_001",
+    "verified": true,
+    "created_at": "2026-04-30T17:39:41.571144",
+    "verified_at": "2026-04-30T17:39:41.578145",
+    "garmin_connected": false,
+    "profile": {}
+  },
+  "test_verify_001": {
+    "discord_id": "test_verify_001",
+    "verified": true,
+    "created_at": "2026-04-30T17:39:41.587243",
+    "verified_at": "2026-04-30T17:39:41.594755",
+    "garmin_connected": false,
+    "profile": {}
+  },
+  "test_verify_wrong_001": {
+    "discord_id": "test_verify_wrong_001",
+    "verified": false,
+    "verification_code": "881590",
+    "created_at": "2026-04-30T17:39:41.603270",
+    "verified_at": null,
+    "garmin_connected": false,
+    "profile": {}
+  },
+  "test_update_001": {
+    "discord_id": "test_update_001",
+    "verified": false,
+    "verification_code": "862687",
+    "created_at": "2026-04-30T17:39:41.613814",
+    "verified_at": null,
+    "garmin_connected": true,
+    "profile": {
+      "goal": "Marathon"
+    }
+  },
+  "test_list_001": {
+    "discord_id": "test_list_001",
+    "verified": false,
+    "verification_code": "283634",
+    "created_at": "2026-04-30T17:39:41.631842",
+    "verified_at": null,
+    "garmin_connected": false,
+    "profile": {}
+  },
+  "test_code_format_001": {
+    "discord_id": "test_code_format_001",
+    "verified": false,
+    "verification_code": "473295",
+    "created_at": "2026-04-30T17:39:41.641768",
+    "verified_at": null,
+    "garmin_connected": false,
+    "profile": {}
+  },
+  "324607583841419276": {
+    "discord_id": "324607583841419276",
+    "verified": true,
+    "created_at": "2026-04-30T18:47:59.946915",
+    "garmin_connected": false,
+    "profile": {},
+    "verified_at": "2026-04-30T18:48:11.386694"
+  },
+  "798470661453643776": {
+    "discord_id": "798470661453643776",
+    "verified": true,
+    "created_at": "2026-04-30T18:43:40.611252",
+    "garmin_connected": false,
+    "profile": {},
+    "verified_at": "2026-04-30T18:43:48.526671"
+  }
+}

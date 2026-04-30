@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import subprocess
 import sys
 from pathlib import Path
@@ -24,8 +25,13 @@ from core.data_persistence import (
     load_daily_stats,
     load_user_profile,
     save_user_profile,
+    save_daily_stats,
+    save_activities,
 )
 from core.notification_service import notify_recommendation
+from core import user_management as user_management
+from core import data_entry
+from core.notification_service import send_verification_dm
 from datetime import datetime
 
 
@@ -58,7 +64,7 @@ CUSTOM_CSS = """
 }
 
 .block-container {
-  padding-top: 1.4rem;
+    padding-top: 4.4rem;
   padding-bottom: 2.5rem;
 }
 
@@ -142,6 +148,33 @@ DASHBOARD_DEFAULTS: dict[str, Any] = {
 
 MOBILITY_OPTIONS = ["Gesund", "Rollstuhl", "Leichte Einschränkungen"]
 GOAL_OPTIONS = ["Kraft und Ausdauer maximieren", "Ausdauer Fokus", "Kraft Fokus"]
+
+
+def _request_verification_compat(discord_id: str) -> dict[str, Any]:
+    """Request a verification code with backward compatibility for older modules."""
+    if hasattr(user_management, "request_verification"):
+        return user_management.request_verification(discord_id)
+
+    # Fallback path if an older user_management module is loaded.
+    user = user_management.register_user(discord_id)
+    code = user.get("verification_code")
+    if user.get("verified") or not code:
+        refreshed_code = f"{random.randint(100000, 999999)}"
+        updated = user_management.update_user(
+            discord_id,
+            {
+                "verified": False,
+                "verification_code": refreshed_code,
+                "verified_at": None,
+                "created_at": datetime.utcnow().isoformat(),
+            },
+        )
+        if isinstance(updated, dict):
+            return updated
+        user["verified"] = False
+        user["verification_code"] = refreshed_code
+        user["verified_at"] = None
+    return user
 
 
 def _to_number(value: Any) -> float | None:
@@ -246,21 +279,24 @@ def _normalize_choice(value: Any, options: list[str], default_value: str) -> str
 
 
 
-def _init_state() -> None:
-    profile = load_user_profile()
+def _init_state(user_id: str) -> None:
+    profile = load_user_profile(user_id=user_id)
     normalized_mobility = _normalize_choice(profile.get("mobility", DASHBOARD_DEFAULTS["mobility"]), MOBILITY_OPTIONS, DASHBOARD_DEFAULTS["mobility"])
     normalized_goal = _normalize_choice(profile.get("goal", DASHBOARD_DEFAULTS["goal"]), GOAL_OPTIONS, DASHBOARD_DEFAULTS["goal"])
-    st.session_state["mobility"] = _normalize_choice(st.session_state.get("mobility", normalized_mobility), MOBILITY_OPTIONS, normalized_mobility)
-    st.session_state["goal"] = _normalize_choice(st.session_state.get("goal", normalized_goal), GOAL_OPTIONS, normalized_goal)
-    st.session_state.setdefault("preference", str(profile.get("preference", DASHBOARD_DEFAULTS["preference"])).strip())
-    st.session_state.setdefault("notify_discord", bool(profile.get("notify_discord", DASHBOARD_DEFAULTS["notify_discord"])))
-    st.session_state.setdefault("discord_user_id", str(profile.get("discord_user_id", DASHBOARD_DEFAULTS["discord_user_id"])).strip())
+    # Use setdefault to avoid modifying widget state after widget instantiation
+    st.session_state.setdefault("mobility_config", normalized_mobility)
+    st.session_state.setdefault("goal_config", normalized_goal)
+    st.session_state.setdefault("preference_config", str(profile.get("preference", DASHBOARD_DEFAULTS["preference"])).strip())
+    st.session_state.setdefault("notify_discord_config", bool(profile.get("notify_discord", DASHBOARD_DEFAULTS["notify_discord"])))
+    st.session_state.setdefault("discord_user_id_config", str(profile.get("discord_user_id", DASHBOARD_DEFAULTS["discord_user_id"])).strip())
     if "refresh_recommendation" not in st.session_state:
         st.session_state.refresh_recommendation = False
     if "trigger_notification_on_refresh" not in st.session_state:
         st.session_state.trigger_notification_on_refresh = False
     st.session_state.setdefault("coach_status_lines", ["Bereit."])
     st.session_state.setdefault("coach_status_level", "info")
+    # Verification state: check if user has verified discord_user_id
+    st.session_state.setdefault("discord_verified", bool(profile.get("discord_user_id", "").strip()))
 
 
 def _set_coach_status(lines: list[str], level: str = "info") -> None:
@@ -282,15 +318,15 @@ def _render_coach_status(container: Any) -> None:
 
 
 
-def _save_profile_from_sidebar() -> dict[str, Any]:
+def _save_profile_from_sidebar(user_id: str) -> dict[str, Any]:
     profile = {
-        "mobility": st.session_state.mobility.strip(),
-        "preference": st.session_state.preference.strip(),
-        "goal": st.session_state.goal.strip(),
-        "notify_discord": bool(st.session_state.notify_discord),
-        "discord_user_id": st.session_state.discord_user_id.strip(),
+        "mobility": st.session_state.mobility_config.strip(),
+        "preference": st.session_state.preference_config.strip(),
+        "goal": st.session_state.goal_config.strip(),
+        "notify_discord": bool(st.session_state.notify_discord_config),
+        "discord_user_id": st.session_state.discord_user_id_config.strip(),
     }
-    save_user_profile(profile)
+    save_user_profile(profile, user_id=user_id)
     return profile
 
 
@@ -316,36 +352,31 @@ def _reload_garmin_data() -> tuple[bool, str]:
 
 def _build_profile() -> coach_agent.CoachProfile:
     return coach_agent.CoachProfile(
-        mobility=st.session_state.mobility,
-        preference=st.session_state.preference,
-        goal=st.session_state.goal,
+        mobility=st.session_state.mobility_config,
+        preference=st.session_state.preference_config,
+        goal=st.session_state.goal_config,
     )
 
 
 
-def _verification_gate() -> bool:
-    return True
-
-
-
-def _render_sidebar() -> tuple[dict[str, Any], Any]:
+def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
     with st.sidebar:
         st.markdown("### Zugang & Profil")
         st.selectbox(
             "Mobilität",
             MOBILITY_OPTIONS,
-            key="mobility",
+            key="mobility_config",
             help="Wähle den Mobilitätstyp, der deine Trainingsauswahl steuert.",
         )
         st.selectbox(
             "Trainingsziel",
             GOAL_OPTIONS,
-            key="goal",
+            key="goal_config",
             help="Das Ziel wird zur Auswahl der passenden Einheit verwendet.",
         )
         st.text_area(
             "Sonstig zu berücksichtigende Aspekte",
-            key="preference",
+            key="preference_config",
             height=96,
             placeholder="z. B. ich trage gerne sonnenbrille, keine harten Sprints, lieber morgens trainieren",
             help="Zusätzliche Hinweise, die der Coach bei der Empfehlung berücksichtigen soll.",
@@ -386,18 +417,30 @@ def _render_sidebar() -> tuple[dict[str, Any], Any]:
 
         st.markdown("---")
         st.markdown("### Benachrichtigung")
-        st.toggle("Discord DM senden", key="notify_discord")
-        st.text_input("Discord User-ID", key="discord_user_id", help="Empfaenger-ID fuer Discord DM via Bot-Token.")
+        st.toggle("Discord DM senden", key="notify_discord_config")
+        st.text_input("Discord User-ID", key="discord_user_id_config", help="Empfaenger-ID fuer Discord DM via Bot-Token.")
         st.caption("Discord Server für DM-Setup: https://discord.gg/DPMpqmEaN7")
 
         st.markdown("---")
-        save_clicked = st.button("Profil speichern", use_container_width=True)
-        if save_clicked:
-            profile = _save_profile_from_sidebar()
-            st.success("Profil gespeichert")
-            return profile, status_box
+        col_save, col_logout = st.columns(2)
+        with col_save:
+            save_clicked = st.button("Profil speichern", use_container_width=True)
+            if save_clicked:
+                profile = _save_profile_from_sidebar(user_id=user_id)
+                st.success("Profil gespeichert")
+                return profile, status_box
+        with col_logout:
+            logout_clicked = st.button("Logout", use_container_width=True)
+            if logout_clicked:
+                st.session_state.discord_verified = False
+                st.session_state.pop("active_discord_id", None)
+                st.session_state.pop("temp_discord_id", None)
+                st.session_state.pop("temp_code_input", None)
+                st.session_state.pop("temp_code_sent", None)
+                st.info("Du wurdest abgemeldet. Bitte registriere dich erneut.")
+                st.rerun()
 
-    return _save_profile_from_sidebar(), status_box
+    return _save_profile_from_sidebar(user_id=user_id), status_box
 
 
 
@@ -411,16 +454,26 @@ def _render_summary_cards(daily_stats: dict[str, Any], activities: list[dict[str
 
     cols = st.columns(5)
     metrics = [
-        ("Sleep", sleep_score, "/100", f"Sleep Score der letzten Nacht: {sleep_score if sleep_score is not None else 'n/a'}"),
-        ("Body Battery", body_battery, "/100", f"Energielevel fuer Training: {body_battery if body_battery is not None else 'n/a'}"),
-        ("Stress", stress, "avg", f"Durchschnittlicher Stresswert des Tages: {stress if stress is not None else 'n/a'}"),
-        ("VO2Max", vo2_max, "ml/kg/min", f"Aussage ueber aerobe Fitness: {vo2_max if vo2_max is not None else 'n/a'}"),
-        ("RHR", resting_hr, "bpm", f"Ruhepuls: {resting_hr if resting_hr is not None else 'n/a'}"),
+        ("Sleep", sleep_score, "/100", "Score der letzten Nacht. Der Garmin Sleep Score ist ein Wert von 0 bis 100, der die Schlafqualität basierend auf Dauer, Phasen (Tief-, Leicht-, REM-Schlaf), Stresslevel (HFV) und Unterbrechungen bewertet."),
+        ("Body Battery", body_battery, "/100", "Energielevel fuer Training"),
+        ("Stress", stress, "HFV/HRV", "Indexwert, der auf der Herzfrequenzvariabilität (HFV/HRV) basiert. Die Uhr analysiert die Abstände zwischen den Herzschlägen (HFV). Eine geringere Variabilität deutet auf höheren Stress hin."),
+        ("VO2Max", vo2_max, "ml/kg/min", "Aussage ueber aerobe Fitness. Maximale Sauerstoffaufnahme."),
+        ("RHR", resting_hr, "bpm", "Ruhepuls"),
     ]
 
     for column, (label, value, suffix, help_text) in zip(cols, metrics):
         with column:
-            st.metric(label, "n/a" if value is None else round(value, 1), suffix, help=help_text)
+            # Show the main metric value without a delta (no arrow, neutral color)
+            if value is None:
+                display = "n/a"
+            else:
+                display = f"{round(value, 1)}"
+            st.metric(label, display, delta=None, help=help_text)
+            # Render the unit/suffix as a muted note below the metric
+            st.markdown(
+                f"<div style='color:#94a3b8; font-size:0.9rem; margin-top:0.15rem'>{suffix}</div>",
+                unsafe_allow_html=True,
+            )
 
     st.write("")
 
@@ -470,83 +523,215 @@ def _render_recommendation(recommendation: dict[str, Any]) -> None:
     st.write("")
 
 
+def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
+    """Render the Data Sources tab with Garmin OAuth and manual entry forms."""
+    st.markdown("## Datenquellen")
+    st.write("Verbinde dein Garmin-Gerät oder trag Daten manuell ein.")
+    st.write("")
+    
+    # Garmin OAuth section
+    data_entry.render_garmin_oauth_section()
+    st.markdown("---")
+    
+    # Manual health entry
+    st.markdown("### Manuelle Daten eingeben")
+    tab_health, tab_activity = st.tabs(["Gesundheitsdaten", "Aktivität"])
+    
+    with tab_health:
+        health_data = data_entry.render_manual_health_entry()
+        if st.button("Gesundheitsdaten speichern", key="save_health_btn"):
+            try:
+                # Convert date to dict key format
+                date_key = health_data.get("date", "")
+                health_dict = {date_key: {k: v for k, v in health_data.items() if k != "date"}}
+                save_daily_stats(health_dict, user_id=user_id)
+                st.success(f"Gesundheitsdaten für {date_key} gespeichert.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Fehler beim Speichern: {exc}")
+    
+    with tab_activity:
+        activity_data = data_entry.render_manual_activity_entry()
+        if activity_data is not None:
+            try:
+                # Load existing activities and append new one
+                current_activities = load_activities(user_id=user_id)
+                current_activities.insert(0, activity_data)
+                save_activities(current_activities, user_id=user_id)
+                st.success(f"Aktivität ({activity_data.get('activity_type')}) gespeichert.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Fehler beim Speichern: {exc}")
+
+
 def main() -> None:
-    _init_state()
+    # Initialize minimal session state for verification gate
+    st.session_state.setdefault("discord_verified", False)
+    st.session_state.setdefault("temp_discord_id", "")
+    st.session_state.setdefault("temp_code_input", "")
+    st.session_state.setdefault("temp_code_sent", False)
+    st.session_state.setdefault("active_discord_id", "")
 
-    daily_stats = load_daily_stats()
-    activities = load_activities()
+    # Verify user FIRST before loading or rendering anything else
+    if not st.session_state.get("discord_verified"):
+        st.markdown("### Anmeldung / Verifikation")
+        st.caption("Zur Nutzung des Dashboards bitte mit deiner Discord-ID registrieren und per DM verifizieren.")
+        st.info("Bitte zuerst dem Discord-Server beitreten: https://discord.gg/DPMpqmEaN7")
 
-    if not _verification_gate():
-        return
+        discord_id = st.text_input("Discord User-ID (numerisch)", value=st.session_state.get("temp_discord_id", ""), key="reg_discord_id_field")
+        st.session_state["temp_discord_id"] = discord_id
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Registrieren & Code senden", key="reg_send_code_btn"):
+                if not discord_id:
+                    st.error("Bitte eine Discord User-ID angeben.")
+                else:
+                    # Always (re)request a fresh verification code and send it.
+                    user = _request_verification_compat(str(discord_id).strip())
+                    code = user.get("verification_code")
+                    if not code:
+                        st.error("Kein Verifizierungscode verfügbar. Bitte versuche es erneut oder kontaktiere den Support.")
+                    else:
+                        invite = os.getenv("DISCORD_SERVER_INVITE", "https://discord.gg/DPMpqmEaN7")
+                        sent, msg = send_verification_dm(str(discord_id).strip(), str(code), invite_link=invite)
+                        if sent:
+                            st.success("Verifizierungs-Code per DM gesendet. Bitte prüfe Discord.")
+                            st.session_state["temp_code_sent"] = True
+                        else:
+                            msg_lower = str(msg).lower()
+                            no_mutual_guild = ("no mutual guilds" in msg_lower) or ("50278" in msg_lower)
+                            if no_mutual_guild:
+                                st.warning("Bitte zuerst unserem Discord-Server beitreten, damit ich dir eine DM senden kann.")
+                                st.markdown("Server beitreten: https://discord.gg/DPMpqmEaN7")
+                                st.info("Danach erneut auf 'Registrieren & Code senden' klicken, um einen neuen Code zu erhalten.")
+                            else:
+                                st.error(f"Fehler beim Senden: {msg}")
 
-    profile, status_box = _render_sidebar()
+        with col2:
+            st.caption("Hast du bereits einen Code? Hier eingeben.")
+            entered = st.text_input("Verifizierungs-Code", value=st.session_state.get("temp_code_input", ""), key="reg_code_input_field")
+            st.session_state["temp_code_input"] = entered
+            if st.button("Code verifizieren", key="reg_verify_btn"):
+                if not discord_id:
+                    st.error("Gib zuerst deine Discord User-ID ein.")
+                elif not entered:
+                    st.error("Bitte Code eingeben.")
+                else:
+                    ok = user_management.verify_user(str(discord_id).strip(), str(entered).strip())
+                    if ok:
+                        st.session_state.discord_verified = True
+                        st.session_state.active_discord_id = str(discord_id).strip()
+                        # Persist discord id in user profile
+                        profile = load_user_profile(user_id=str(discord_id).strip())
+                        profile = profile or {}
+                        profile["discord_user_id"] = str(discord_id).strip()
+                        profile["notify_discord"] = True
+                        save_user_profile(profile, user_id=str(discord_id).strip())
+                        st.success("Verifiziert — du wirst jetzt zum Dashboard weitergeleitet.")
+                        st.balloons()
+                        st.rerun()
+                    else:
+                        st.error("Verifikation fehlgeschlagen. Code ungültig oder abgelaufen.")
+        
+        # Block all further rendering
+        st.stop()
+
+    # ===== USER IS VERIFIED FROM HERE ON =====
+    # Initialize full app state AFTER successful verification
+    active_user_id = str(st.session_state.get("active_discord_id", "")).strip()
+    if not active_user_id:
+        st.session_state.discord_verified = False
+        st.warning("Session ohne Benutzer-ID. Bitte erneut anmelden.")
+        st.rerun()
+
+    _init_state(user_id=active_user_id)
+    
+    daily_stats = load_daily_stats(user_id=active_user_id)
+    activities = load_activities(user_id=active_user_id)
+
+    profile, status_box = _render_sidebar(user_id=active_user_id)
     coach_profile = _build_profile()
-    refresh = bool(st.session_state.pop("refresh_recommendation", False))
-    notify_on_refresh = bool(st.session_state.pop("trigger_notification_on_refresh", False))
+    
+    # Main tabs
+    tab_dashboard, tab_data_sources = st.tabs(["Dashboard", "Datenquellen"])
+    
+    with tab_dashboard:
+        refresh = bool(st.session_state.pop("refresh_recommendation", False))
+        notify_on_refresh = bool(st.session_state.pop("trigger_notification_on_refresh", False))
 
-    if refresh:
-        _set_coach_status(["KI wird gefragt..."], "info")
-        _render_coach_status(status_box)
-        with st.spinner("KI wird neu konsultiert..."):
+        if refresh:
+            _set_coach_status(["KI wird gefragt..."], "info")
+            _render_coach_status(status_box)
+            with st.spinner("KI wird neu konsultiert..."):
+                recommendation = coach_agent.get_coach_recommendation(
+                    profile=coach_profile,
+                    daily_stats=daily_stats,
+                    activities=activities,
+                    refresh=True,
+                )
+            _set_coach_status(["KI-Antwort wird ins Dashboard geladen."], "info")
+            _render_coach_status(status_box)
+        else:
             recommendation = coach_agent.get_coach_recommendation(
                 profile=coach_profile,
                 daily_stats=daily_stats,
                 activities=activities,
-                refresh=True,
+                refresh=False,
             )
-        _set_coach_status(["KI-Antwort wird ins Dashboard geladen."], "info")
-        _render_coach_status(status_box)
-    else:
-        recommendation = coach_agent.get_coach_recommendation(
-            profile=coach_profile,
-            daily_stats=daily_stats,
-            activities=activities,
-            refresh=False,
+
+        if notify_on_refresh:
+            _set_coach_status(["Notification wird gesendet..."], "info")
+            _render_coach_status(status_box)
+            try:
+                notify_result = notify_recommendation(recommendation, profile, daily_stats=daily_stats)
+            except TypeError:
+                notify_result = notify_recommendation(recommendation, profile)
+            if notify_result["sent"]:
+                st.success(" | ".join(notify_result["sent"]))
+                _set_coach_status(["Gesendet: " + " | ".join(notify_result["sent"])], "success")
+            for error in notify_result["errors"]:
+                st.error(error)
+                _set_coach_status(["Fehler: " + error], "error")
+
+            if not notify_result["sent"] and not notify_result["errors"]:
+                skipped = notify_result.get("skipped", [])
+                if skipped:
+                    _set_coach_status(["Hinweis: " + skipped[0]], "info")
+
+            if recommendation.get("source") == "local":
+                reason = str(recommendation.get("fallback_reason", "LLM nicht erreichbar oder API-Key fehlt.")).strip()
+                _set_coach_status([f"Lokaler Fallback aktiv: {reason}"], "error")
+
+            _render_coach_status(status_box)
+        elif refresh:
+            if recommendation.get("source") == "local":
+                reason = str(recommendation.get("fallback_reason", "LLM nicht erreichbar oder API-Key fehlt.")).strip()
+                _set_coach_status([f"Lokaler Fallback aktiv: {reason}"], "error")
+            else:
+                _set_coach_status(["Aktualisierung abgeschlossen."], "success")
+            _render_coach_status(status_box)
+
+        st.markdown(
+            "<div class='hero'><h1>Personal Garmin AI Coach</h1><p>Fitnessdaten, Aktivitäten und die heutige Empfehlung in einem Dashboard. Der Coach nutzt einen 6-Stunden-Cache, damit Token gespart werden.</p></div>",
+            unsafe_allow_html=True,
         )
+        st.write("")
 
-    if notify_on_refresh:
-        _set_coach_status(["Notification wird gesendet..."], "info")
-        _render_coach_status(status_box)
-        try:
-            notify_result = notify_recommendation(recommendation, profile, daily_stats=daily_stats)
-        except TypeError:
-            notify_result = notify_recommendation(recommendation, profile)
-        if notify_result["sent"]:
-            st.success(" | ".join(notify_result["sent"]))
-            _set_coach_status(["Gesendet: " + " | ".join(notify_result["sent"])], "success")
-        for error in notify_result["errors"]:
-            st.error(error)
-            _set_coach_status(["Fehler: " + error], "error")
-
-        if not notify_result["sent"] and not notify_result["errors"]:
-            skipped = notify_result.get("skipped", [])
-            if skipped:
-                _set_coach_status(["Hinweis: " + skipped[0]], "info")
-
-        if recommendation.get("source") == "local":
-            reason = str(recommendation.get("fallback_reason", "LLM nicht erreichbar oder API-Key fehlt.")).strip()
-            _set_coach_status([f"Lokaler Fallback aktiv: {reason}"], "error")
-
-        _render_coach_status(status_box)
-    elif refresh:
-        if recommendation.get("source") == "local":
-            reason = str(recommendation.get("fallback_reason", "LLM nicht erreichbar oder API-Key fehlt.")).strip()
-            _set_coach_status([f"Lokaler Fallback aktiv: {reason}"], "error")
+        # Only show data and recommendations if we have at least some data
+        has_data = bool(daily_stats or activities)
+        if not has_data:
+            st.info("📊 Noch keine Daten vorhanden. Gehe zu 'Datenquellen' und verbinde Garmin oder trag manuelle Daten ein.")
         else:
-            _set_coach_status(["Aktualisierung abgeschlossen."], "success")
-        _render_coach_status(status_box)
-
-    st.markdown(
-        "<div class='hero'><h1>Personal Garmin AI Coach</h1><p>Fitnessdaten, Aktivitäten und die heutige Empfehlung in einem Dashboard. Der Coach nutzt einen 6-Stunden-Cache, damit Token gespart werden.</p></div>",
-        unsafe_allow_html=True,
-    )
-    st.write("")
-
-    _render_summary_cards(daily_stats, activities)
-    st.write("")
-
-    _render_recommendation(recommendation)
-    _render_activities(activities)
+            _render_summary_cards(daily_stats, activities)
+            st.write("")
+            _render_recommendation(recommendation)
+            _render_activities(activities)
+    
+    with tab_data_sources:
+        st.markdown(f"**Aktiver Benutzer:** {active_user_id}")
+        st.divider()
+        _render_data_sources_tab(profile, user_id=active_user_id)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,8 @@ ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 DEFAULT_GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 CACHE_PATH = DATA_DIR / "coach_recommendation.json"
 CACHE_TTL_HOURS = 6
+# If Body Battery drops under this threshold, recommend an explicit full rest day (Ruhetag)
+RUHETAG_BODY_BATTERY_THRESHOLD = 35
 
 @dataclass(frozen=True)
 class CoachProfile:
@@ -41,7 +43,8 @@ COACH_SYSTEM_PROMPT = (
     "WICHTIG: Wenn Body Battery < 50 ODER Sleep < 60, dann IMMER nur Recovery-Training mit Intensitaet 1-4. "
     "Die Begründung MUSS explizit auf die aktuellen Gesundheitsdaten Bezug nehmen (Sleep Score, Body Battery, Stress, VO2Max, RHR, letzte Aktivität). "
     "WICHTIG: Verwende in der Begründung IMMER den exakten Zielnamen aus dem Nutzerprofil. Keine Synonyme oder Abwandlungen. "
-    "Keine allgemeinen Floskeln."
+    "Keine allgemeinen Floskeln. "
+    "WICHTIG: Wenn Body Battery um die 35 oder niedriger dann sage auch gerne was in Richtung 'Heute bitte gar kein Training mehr — ruhe dich aus; versuche es morgen wieder.' und gib dies als titel 'Ruhetag' zurück."
 )
 
 
@@ -177,6 +180,8 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
     sleep_score = _as_number(latest_day.get("sleep_score"))
     body_battery = _as_number(latest_day.get("body_battery"))
     recovery_low = (sleep_score is not None and sleep_score < 60) or (body_battery is not None and body_battery < 50)
+    # Very low body battery triggers an explicit "Ruhetag" (no-training today)
+    recovery_ruhetag = body_battery is not None and body_battery < RUHETAG_BODY_BATTERY_THRESHOLD
     
     user_payload = {
         "nutzerprofil": {
@@ -189,6 +194,7 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
             "sleep_score": sleep_score,
             "body_battery": body_battery,
             "recovery_kritisch": recovery_low,
+            "recovery_ruhetag": recovery_ruhetag,
             "warnung": "RECOVERY MODE" if recovery_low else "normal",
         },
         "historie_7_tage": _compact_daily_stats(daily_stats),
@@ -204,6 +210,7 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
             "Erwaehne keine Wochenfrequenz, keinen Plan und keine Routine.",
             "KRITISCH: Wenn Schlaf < 60 oder Body Battery < 50, dann schlage RECOVERY-TRAINING vor, nie High-Intensity. Empfehle Ruhe, lockeres Gehen, easy Yoga oder maximale Intensitaet 3-4.",
             f"NOTFALL: recovery_kritisch={recovery_low} - Falls TRUE, IMMER Intensitaet 1-4, egal welches Trainingsziel!",
+            f"NOTFALL_RUHETAG: recovery_ruhetag={recovery_ruhetag} - Falls TRUE, gib exakt 'Ruhetag' mit dem Text 'Heute bitte gar kein Training mehr — ruhe dich aus; versuche es morgen wieder.' als titel/empfehlung zurueck.",
             "AKTIVITAETEN: distance_km = absolute Distanz der letzten Aktivitaet, training_effect_score = aerober/anaerober Reiz-Score (1-5). Verwechsle diese NICHT!",
             "Wenn die Daten gut sind und das Ziel Marathon ist, bevorzuge einen konkreten Longrun, Tempolauf oder Lauftechnik-Session statt einer allgemeinen Regel.",
             "Keine Lauf-Intervalle fuer Rollstuhlfahrer; stattdessen Handbike oder Oberkoerper-Kraft-Ausdauer.",
@@ -325,6 +332,16 @@ def _concrete_next_training(profile: CoachProfile, daily_stats: dict[str, Any], 
         (sleep_score is not None and sleep_score < 60)
         or (body_battery is not None and body_battery < 50)  # Changed from 40 to 50 for better recovery awareness
     )
+
+    # Explicit Ruhetag: if Body Battery is very low, recommend no training today
+    ruhetag = body_battery is not None and body_battery < RUHETAG_BODY_BATTERY_THRESHOLD
+    if ruhetag:
+        return {
+            "titel": "Ruhetag",
+            "empfehlung": "Heute bitte gar kein Training mehr — ruhe dich aus; versuche es morgen wieder. Wenn du dich bewegen moechtest: 20-30 Min sehr lockeres Gehen oder Mobility. Alternative: 15-20 Min Atem- und Mobilitaetsroutine.",
+            "intensitaet": 1,
+            "begruendung": f"Deine Body Battery ist sehr niedrig ({body_battery if body_battery is not None else 'n/a'}). Deshalb empfehle ich heute keinen Trainingsreiz und priorisiere Ruhe und Regeneration.",
+        }
 
     if "marathon" in goal:
         if recovery_low:
@@ -511,6 +528,10 @@ def _enrich_recommendation(
         (sleep_score is not None and sleep_score < 60)
         or (body_battery is not None and body_battery < 50)  # Lowered threshold from 40 to 50
     )
+    # If Body Battery is critically low, prefer explicit Ruhetag fallback
+    ruhetag = body_battery is not None and body_battery < RUHETAG_BODY_BATTERY_THRESHOLD
+    if ruhetag:
+        return base
     
     # If recovery is low, always use the safe fallback recommendation
     if recovery_low:
