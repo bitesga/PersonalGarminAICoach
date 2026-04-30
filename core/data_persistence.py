@@ -78,3 +78,31 @@ def load_activities() -> list[dict[str, Any]]:
         return data.get("activities", [])
     except json.JSONDecodeError:
         return []
+
+
+def save_user_profile(profile: dict[str, Any]) -> Path:
+    """Save the dashboard user profile and preferences to JSON."""
+    data_dir = _ensure_data_dir()
+    filename = data_dir / "user_profile.json"
+    output = {
+        "last_updated": datetime.now().isoformat(),
+        "profile": profile,
+    }
+    filename.write_text(json.dumps(output, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    return filename
+
+
+def load_user_profile() -> dict[str, Any]:
+    """Load the persisted user profile and preferences."""
+    data_dir = _ensure_data_dir()
+    filename = data_dir / "user_profile.json"
+
+    if not filename.exists():
+        return {}
+
+    try:
+        data = json.loads(filename.read_text(encoding="utf-8"))
+        profile = data.get("profile", {})
+        return profile if isinstance(profile, dict) else {}
+    except json.JSONDecodeError:
+        return {}

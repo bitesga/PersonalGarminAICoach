@@ -1,9 +1,9 @@
 {
   "2026-04-29": {
     "date": "2026-04-29",
-    "body_battery": 68,
+    "body_battery": 60,
     "sleep_score": 70,
-    "stress": 15.0,
+    "stress": 16.0,
     "vo2_max": 59.0,
     "resting_heart_rate": 42
   },

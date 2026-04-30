@@ -1,4 +1,5 @@
 garminconnect
 python-dotenv
 instructor
-google-generativeai
+google-genai
+streamlit
