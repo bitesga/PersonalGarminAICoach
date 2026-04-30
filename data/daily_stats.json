@@ -1,10 +1,10 @@
 {
   "2026-04-29": {
     "date": "2026-04-29",
-    "body_battery": 60,
+    "body_battery": 22,
     "sleep_score": 70,
-    "stress": 16.0,
-    "vo2_max": 59.0,
+    "stress": 20.0,
+    "vo2_max": 60.0,
     "resting_heart_rate": 42
   },
   "2026-04-28": {
@@ -12,7 +12,7 @@
     "body_battery": 34,
     "sleep_score": 81,
     "stress": 20.0,
-    "vo2_max": 59.0,
+    "vo2_max": 60.0,
     "resting_heart_rate": 42
   },
   "2026-04-27": {
@@ -20,7 +20,7 @@
     "body_battery": 44,
     "sleep_score": 85,
     "stress": 15.0,
-    "vo2_max": 59.0,
+    "vo2_max": 60.0,
     "resting_heart_rate": 42
   },
   "2026-04-26": {
@@ -28,7 +28,7 @@
     "body_battery": 51,
     "sleep_score": 86,
     "stress": 15.0,
-    "vo2_max": 59.0,
+    "vo2_max": 60.0,
     "resting_heart_rate": 42
   },
   "2026-04-25": {
@@ -36,7 +36,7 @@
     "body_battery": 48,
     "sleep_score": 85,
     "stress": 17.0,
-    "vo2_max": 59.0,
+    "vo2_max": 60.0,
     "resting_heart_rate": 41
   },
   "2026-04-24": {
@@ -44,7 +44,7 @@
     "body_battery": 42,
     "sleep_score": 75,
     "stress": 19.0,
-    "vo2_max": 59.0,
+    "vo2_max": 60.0,
     "resting_heart_rate": 43
   },
   "2026-04-23": {
@@ -53,6 +53,14 @@
     "sleep_score": 73,
     "stress": 16.0,
     "vo2_max": 59.0,
+    "resting_heart_rate": 44
+  },
+  "2026-04-30": {
+    "date": "2026-04-30",
+    "body_battery": 31,
+    "sleep_score": 80,
+    "stress": 21.0,
+    "vo2_max": 60.0,
     "resting_heart_rate": 44
   }
 }

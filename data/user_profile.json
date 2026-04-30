@@ -1,13 +1,10 @@
 {
-  "last_updated": "2026-04-29T14:45:00.413652",
+  "last_updated": "2026-04-30T18:48:13.032455",
   "profile": {
-    "email_verified": true,
-    "email": "khalidlakniti@web.de",
     "mobility": "Gesund",
     "preference": "",
-    "goal": "",
-    "notify_discord": false,
-    "discord_user_id": "",
-    "notify_email_enabled": false
+    "goal": "Kraft und Ausdauer maximieren",
+    "notify_discord": true,
+    "discord_user_id": "324607583841419276"
   }
 }

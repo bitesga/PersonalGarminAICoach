@@ -1,5 +1,5 @@
 garminconnect
 python-dotenv
 instructor
-google-genai
 streamlit
+groq

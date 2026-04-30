@@ -4,27 +4,45 @@ from __future__ import annotations
 
 import json
 import os
-import smtplib
 import urllib.error
 import urllib.request
-from email.message import EmailMessage
 from typing import Any
 
 
-def _build_message(recommendation: dict[str, Any]) -> tuple[str, str]:
+def _build_message(recommendation: dict[str, Any]) -> str:
     title = str(recommendation.get("titel", "Coach Empfehlung"))
     intensity = recommendation.get("intensitaet", "n/a")
     recommendation_text = str(recommendation.get("empfehlung", ""))
     reasoning = str(recommendation.get("begruendung", ""))
+    latest_day = recommendation.get("latest_day", {}) if isinstance(recommendation.get("latest_day", {}), dict) else {}
+    sleep_score = latest_day.get("sleep_score", "n/a")
+    body_battery = latest_day.get("body_battery", "n/a")
+    stress = latest_day.get("stress", "n/a")
+    vo2_max = latest_day.get("vo2_max", "n/a")
+    resting_hr = latest_day.get("resting_heart_rate", "n/a")
 
-    subject = f"[Garmin AI Coach] {title}"
+    if "Alternative:" in recommendation_text:
+        main_recommendation, alternative_recommendation = recommendation_text.split("Alternative:", 1)
+        main_recommendation = main_recommendation.strip().rstrip(".")
+        alternative_recommendation = alternative_recommendation.strip().rstrip(".")
+    else:
+        main_recommendation = recommendation_text.strip()
+        alternative_recommendation = "Keine Alternative vorhanden."
+
     body = (
-        f"{title}\n"
-        f"Intensitaet: {intensity}/10\n\n"
-        f"Empfehlung:\n{recommendation_text}\n\n"
-        f"Begruendung:\n{reasoning}\n"
+        f"GUTEN MORGEN SPORTSFREUND!\n\n"
+        f"DEINE TAGESWERTE:\n"
+        f"SLEEP SCORE: {sleep_score}/100\n"
+        f"BODY BATTERY: {body_battery}/100\n"
+        f"STRESS: {stress}\n"
+        f"VO2MAX: {vo2_max}\n"
+        f"RHR: {resting_hr}\n\n"
+        f"HAUPTEMPFEHLUNG:{title}\n{main_recommendation}\n\n"
+        f"ALTERNATIVE:\n{alternative_recommendation}\n\n"
+        f"INTENSITAET: {intensity}/10\n\n"
+        f"BEGRUENDUNG:\n{reasoning}\n"
     )
-    return subject, body
+    return body
 
 
 def _discord_api_post(url: str, payload: dict[str, Any], token: str) -> dict[str, Any]:
@@ -34,6 +52,7 @@ def _discord_api_post(url: str, payload: dict[str, Any], token: str) -> dict[str
         headers={
             "Authorization": f"Bot {token}",
             "Content-Type": "application/json",
+            "User-Agent": "PersonalGarminAICoach/1.0 (+https://discord.com/developers/docs)",
         },
         method="POST",
     )
@@ -75,67 +94,32 @@ def send_discord_dm(message: str, user_id: str) -> tuple[bool, str]:
         return False, f"Discord-Versand fehlgeschlagen: {exc}"
 
 
-def send_email_notification(subject: str, body: str, to_email: str) -> tuple[bool, str]:
-    smtp_host = os.getenv("SMTP_HOST", "").strip()
-    smtp_port = int(os.getenv("SMTP_PORT", "587"))
-    smtp_username = os.getenv("SMTP_USERNAME", "").strip()
-    smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
-    smtp_from = os.getenv("SMTP_FROM", smtp_username).strip()
-    use_tls = os.getenv("SMTP_USE_TLS", "true").strip().lower() not in {"0", "false", "no"}
-
-    if not smtp_host or not smtp_from:
-        return False, "SMTP_HOST oder SMTP_FROM fehlt."
-    if not to_email:
-        return False, "Empfaenger-E-Mail fehlt."
-
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = smtp_from
-    message["To"] = to_email
-    message.set_content(body)
-
-    try:
-        with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as server:
-            if use_tls:
-                server.starttls()
-            if smtp_username and smtp_password:
-                server.login(smtp_username, smtp_password)
-            server.send_message(message)
-        return True, "E-Mail gesendet."
-    except Exception as exc:
-        return False, f"E-Mail-Versand fehlgeschlagen: {exc}"
-
-
 def notify_recommendation(
     recommendation: dict[str, Any],
     profile: dict[str, Any],
+    daily_stats: dict[str, Any] | None = None,
 ) -> dict[str, list[str]]:
-    """Send Discord/email notification only for newly generated model recommendations."""
+    """Send Discord notification only for newly generated model recommendations."""
     result = {"sent": [], "errors": [], "skipped": []}
 
     if str(recommendation.get("source", "")).lower() != "model":
         result["skipped"].append("Keine neue Modell-Empfehlung; kein Versand.")
         return result
 
-    subject, body = _build_message(recommendation)
+    enriched_recommendation = dict(recommendation)
+    latest_day = {}
+    if isinstance(daily_stats, dict) and daily_stats:
+        latest_key = sorted(daily_stats.keys())[-1]
+        latest_day = daily_stats.get(latest_key, {}) if isinstance(daily_stats.get(latest_key, {}), dict) else {}
+    enriched_recommendation["latest_day"] = latest_day
+
+    body = _build_message(enriched_recommendation)
     discord_enabled = bool(profile.get("notify_discord", False))
-    email_enabled = bool(profile.get("notify_email_enabled", False))
 
     if discord_enabled:
         success, msg = send_discord_dm(body, str(profile.get("discord_user_id", "")).strip())
         (result["sent"] if success else result["errors"]).append(msg)
     else:
         result["skipped"].append("Discord-Benachrichtigung deaktiviert.")
-
-    if email_enabled:
-        if not bool(profile.get("email_verified", False)):
-            result["errors"].append("E-Mail nicht verifiziert; Versand uebersprungen.")
-            return result
-
-        target_email = str(profile.get("email", "")).strip()
-        success, msg = send_email_notification(subject, body, target_email)
-        (result["sent"] if success else result["errors"]).append(msg)
-    else:
-        result["skipped"].append("E-Mail-Benachrichtigung deaktiviert.")
 
     return result
