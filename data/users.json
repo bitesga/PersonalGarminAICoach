@@ -73,10 +73,10 @@
   "324607583841419276": {
     "discord_id": "324607583841419276",
     "verified": true,
-    "created_at": "2026-04-30T18:47:59.946915",
+    "created_at": "2026-05-01T10:36:59.988294",
     "garmin_connected": false,
     "profile": {},
-    "verified_at": "2026-04-30T18:48:11.386694"
+    "verified_at": "2026-05-01T10:37:11.381639"
   },
   "798470661453643776": {
     "discord_id": "798470661453643776",
@@ -85,5 +85,19 @@
     "garmin_connected": false,
     "profile": {},
     "verified_at": "2026-04-30T18:43:48.526671"
+  },
+  "email:khalidlakniti@web.de": {
+    "email": "khalidlakniti@web.de",
+    "verified": true,
+    "created_at": "2026-05-02T07:43:07.518691",
+    "verified_at": "2026-05-02T07:43:25.937993",
+    "garmin_connected": false,
+    "profile": {},
+    "auth": {
+      "salt": "a28aeb96ff53fa1e0a40cfd250fb982c",
+      "password_hash": "a3c1cd8387963be59075a291024b4714caf941ebab959d560173872745297896"
+    },
+    "linked_discord_id": "324607583841419276",
+    "linked_at": "2026-05-02T09:11:38.297359"
   }
 }

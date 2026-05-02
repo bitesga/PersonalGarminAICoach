@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
+import argparse
 import os
 from pathlib import Path
 import sys
@@ -10,7 +11,7 @@ from typing import Any
 from dotenv import load_dotenv
 from garminconnect import Garmin
 
-from data_persistence import save_daily_stats, save_activities
+from data_persistence import load_garmin_credentials, save_daily_stats, save_activities
 
 try:
     # Optional specific exceptions from garminconnect.
@@ -71,7 +72,6 @@ def _extract_sleep_score(stats: dict[str, Any]) -> Any:
         ["dailySleepDTO", "sleepScores", "overall"],
         ["dailySleepDTO", "sleepScores", "overallScore"],
         # Fallback to get_stats payload structure.
-        ["sleepScores", "overall", "value"],
         ["sleepScores", "overallScore", "value"],
         ["sleepScores", "overallScore"],
         ["sleepScores", "value"],
@@ -199,6 +199,38 @@ def _extract_resting_heart_rate(stats: dict[str, Any]) -> Any:
     return "N/A"
 
 
+def _extract_training_load(data: dict[str, Any]) -> Any:
+    """Extract acute training load (dailyTrainingLoadAcute) from training status."""
+    # Path: mostRecentTrainingStatus.latestTrainingStatusData[deviceId].acuteTrainingLoadDTO.dailyTrainingLoadAcute
+    try:
+        latest_training_status = _get_nested(data, ["mostRecentTrainingStatus", "latestTrainingStatusData"])
+        if isinstance(latest_training_status, dict):
+            # Get first device in the map
+            for device_id, device_data in latest_training_status.items():
+                daily_load = _get_nested(device_data, ["acuteTrainingLoadDTO", "dailyTrainingLoadAcute"])
+                if isinstance(daily_load, (int, float)):
+                    return round(float(daily_load), 1)
+    except Exception:
+        pass
+    return "N/A"
+
+
+def _extract_training_balance_feedback(data: dict[str, Any]) -> Any:
+    """Extract training balance feedback phrase (e.g., AEROBIC_HIGH_SHORTAGE)."""
+    # Path: mostRecentTrainingLoadBalance.metricsTrainingLoadBalanceDTOMap[deviceId].trainingBalanceFeedbackPhrase
+    try:
+        load_balance = _get_nested(data, ["mostRecentTrainingLoadBalance", "metricsTrainingLoadBalanceDTOMap"])
+        if isinstance(load_balance, dict):
+            # Get first device in the map
+            for device_id, device_data in load_balance.items():
+                feedback = device_data.get("trainingBalanceFeedbackPhrase")
+                if feedback:
+                    return str(feedback)
+    except Exception:
+        pass
+    return "N/A"
+
+
 def _extract_vo2max_from_profile(profile: dict[str, Any]) -> Any:
     """Extract VO2Max from user profile (supports multiple sports)."""
     # Check in priority order: running > cycling > swimming > any vo2Max field
@@ -219,18 +251,46 @@ def _extract_vo2max_from_profile(profile: dict[str, Any]) -> Any:
     return "N/A"
 
 
+def _format_activity_time(activity: dict[str, Any]) -> str:
+    """Return a HH:MM activity time if Garmin provides a start timestamp."""
+    start_time = activity.get("startTimeInSeconds")
+    if start_time:
+        try:
+            return datetime.fromtimestamp(start_time).strftime("%H:%M")
+        except (ValueError, TypeError, OSError):
+            pass
+    start_time_gmt = activity.get("startTimeGMT")
+    if start_time_gmt:
+        start_text = str(start_time_gmt)
+        if "T" in start_text:
+            return start_text.split("T", 1)[1][:5]
+        if " " in start_text:
+            return start_text.split(" ", 1)[1][:5]
+        return start_text[:5]
+    return "N/A"
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Fetch Garmin data for a specific user.")
+    parser.add_argument("--user-id", dest="user_id", default="", help="Discord user ID for scoped storage")
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = _parse_args()
+    user_id = str(args.user_id).strip()
     env_path = Path(__file__).resolve().parents[1] / ".env"
     load_dotenv(dotenv_path=env_path)
 
-    email = os.getenv("GARMIN_EMAIL")
-    password = os.getenv("GARMIN_PASSWORD")
+    stored_credentials = load_garmin_credentials(user_id=user_id) if user_id else {}
+    email = stored_credentials.get("email") or os.getenv("GARMIN_EMAIL")
+    password = stored_credentials.get("password") or os.getenv("GARMIN_PASSWORD")
 
     if not email or not password:
         print(
             (
-                "Fehlende Zugangsdaten. Bitte setze GARMIN_EMAIL und GARMIN_PASSWORD "
-                f"in {env_path}."
+                "Fehlende Zugangsdaten. Bitte hinterlege Garmin E-Mail und Passwort in der App "
+                "oder setze GARMIN_EMAIL und GARMIN_PASSWORD in der .env."
             ),
             file=sys.stderr,
         )
@@ -262,12 +322,23 @@ def main() -> int:
         print(f"Warnung: Konnte Profil nicht abrufen: {e}", file=sys.stderr)
         user_profile = {}
 
+    # ===== Fetch training load metrics =====
+    try:
+        training_status = _call_with_backoff(client.get_training_status, today_iso)
+        training_load = _extract_training_load(training_status)
+        training_balance_feedback = _extract_training_balance_feedback(training_status)
+    except Exception as e:
+        print(f"Warnung: Konnte Trainingsbelastung nicht abrufen: {e}", file=sys.stderr)
+        training_load = "N/A"
+        training_balance_feedback = "N/A"
+
     # ===== Fetch latest activity data =====
     activities_all = _call_with_backoff(client.get_activities, 0, 7)
     activities_to_save = []
     
     for idx, activity in enumerate(activities_all[:7]):
         activity_type, training_effect = _extract_activity_data(activity)
+        activity_id = activity.get("activityId") or activity.get("activityIdKey") or f"garmin-{idx}-{activity.get('startTimeInSeconds') or activity.get('startTimeGMT') or today_iso}"
         
         # Convert startTimeInSeconds (Unix timestamp) to ISO date string
         start_time = activity.get("startTimeInSeconds")
@@ -280,12 +351,15 @@ def main() -> int:
             activity_date = activity.get("startTimeGMT") or "N/A"
         
         entry: dict[str, Any] = {
+            "id": str(activity_id),
             "index": idx,
             "date": activity_date,
+            "time": _format_activity_time(activity),
             "activity_type": activity_type,
             "primary_metric": training_effect,  # Training Effect for cardio, Exercises for strength
             "duration": activity.get("duration") or "N/A",
             "calories": activity.get("calories") or "N/A",
+            "source": "garmin",
         }
 
         # Omit distance for strength training (not meaningful)
@@ -329,6 +403,9 @@ def main() -> int:
                 "stress": stress,
                 "vo2_max": vo2max,
                 "resting_heart_rate": rhr,
+                "training_load": training_load if day_offset == 0 else "N/A",
+                "training_load_acute": training_load if day_offset == 0 else "N/A",
+                "training_balance_feedback": training_balance_feedback if day_offset == 0 else "N/A",
             }
             
             if day_offset == 0:
@@ -347,6 +424,9 @@ def main() -> int:
                 print(f"Stress (Durchschnitt): {stress}")
                 print(f"VO2 Max: {vo2max}")
                 print(f"Ruhepuls: {rhr}")
+                print(f"Trainingsbelastung: {training_load}")
+                print(f"Trainingsbelastung (akut): {training_load}")
+                print(f"Training Balance: {training_balance_feedback}")
                 print()
         except Exception as exc:
             print(f"Fehler beim Abrufen der Stats für {target_date}: {exc}", file=sys.stderr)
@@ -355,13 +435,13 @@ def main() -> int:
 
     # ===== Save to JSON =====
     try:
-        stats_file = save_daily_stats(daily_stats_data)
+        stats_file = save_daily_stats(daily_stats_data, user_id=user_id or None)
         print(f"Daily Stats gespeichert in: {stats_file}")
     except Exception as exc:
         print(f"Fehler beim Speichern der Daily Stats: {exc}", file=sys.stderr)
 
     try:
-        activities_file = save_activities(activities_to_save)
+        activities_file = save_activities(activities_to_save, user_id=user_id or None)
         print(f"Aktivitaeten gespeichert in: {activities_file}")
     except Exception as exc:
         print(f"Fehler beim Speichern der Aktivitaeten: {exc}", file=sys.stderr)

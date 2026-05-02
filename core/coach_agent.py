@@ -16,11 +16,12 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
+from core.data_persistence import load_coach_recommendation, save_coach_recommendation
+
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 DEFAULT_GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
-CACHE_PATH = DATA_DIR / "coach_recommendation.json"
 CACHE_TTL_HOURS = 6
 # If Body Battery drops under this threshold, recommend an explicit full rest day (Ruhetag)
 RUHETAG_BODY_BATTERY_THRESHOLD = 35
@@ -69,9 +70,9 @@ def load_coach_inputs(data_dir: Path | None = None) -> tuple[dict[str, Any], lis
     return daily_stats, activities
 
 
-def _load_cached_recommendation(cache_path: Path = CACHE_PATH) -> dict[str, Any] | None:
-    payload = _load_json_file(cache_path, {})
-    if not isinstance(payload, dict):
+def _load_cached_recommendation(user_id: str | None = None) -> dict[str, Any] | None:
+    payload = load_coach_recommendation(user_id=user_id)
+    if not payload or not isinstance(payload, dict):
         return None
 
     generated_at = payload.get("generated_at")
@@ -95,13 +96,18 @@ def _load_cached_recommendation(cache_path: Path = CACHE_PATH) -> dict[str, Any]
     return cached
 
 
-def _save_cached_recommendation(recommendation: dict[str, Any], cache_path: Path = CACHE_PATH) -> None:
-    cache_path.parent.mkdir(exist_ok=True)
-    payload = {
-        "generated_at": datetime.now().isoformat(),
-        "recommendation": recommendation,
-    }
-    cache_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+def _save_cached_recommendation(recommendation: dict[str, Any], user_id: str | None = None) -> None:
+    try:
+        save_coach_recommendation(recommendation, user_id=user_id)
+    except Exception:
+        # best-effort: fall back to writing into global data dir if persistence fails
+        fallback = Path(__file__).resolve().parents[1] / "data" / "coach_recommendation.json"
+        fallback.parent.mkdir(exist_ok=True)
+        payload = {
+            "generated_at": datetime.now().isoformat(),
+            "recommendation": recommendation,
+        }
+        fallback.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
 
 def _compact_daily_stats(daily_stats: dict[str, Any]) -> list[dict[str, Any]]:
@@ -183,6 +189,10 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
     # Very low body battery triggers an explicit "Ruhetag" (no-training today)
     recovery_ruhetag = body_battery is not None and body_battery < RUHETAG_BODY_BATTERY_THRESHOLD
     
+    # Extract training load metrics for intensity adjustment
+    training_load_acute = _as_number(latest_day.get("training_load_acute"))
+    training_balance_feedback = str(latest_day.get("training_balance_feedback", "")).strip()
+    
     user_payload = {
         "nutzerprofil": {
             "mobilitaet": profile.mobility,
@@ -196,6 +206,10 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
             "recovery_kritisch": recovery_low,
             "recovery_ruhetag": recovery_ruhetag,
             "warnung": "RECOVERY MODE" if recovery_low else "normal",
+        },
+        "trainingsbelastung": {
+            "acute_training_load": training_load_acute,
+            "training_balance_feedback": training_balance_feedback,
         },
         "historie_7_tage": _compact_daily_stats(daily_stats),
         "letzte_aktivitaeten": _compact_activities(activities),
@@ -212,6 +226,8 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
             f"NOTFALL: recovery_kritisch={recovery_low} - Falls TRUE, IMMER Intensitaet 1-4, egal welches Trainingsziel!",
             f"NOTFALL_RUHETAG: recovery_ruhetag={recovery_ruhetag} - Falls TRUE, gib exakt 'Ruhetag' mit dem Text 'Heute bitte gar kein Training mehr — ruhe dich aus; versuche es morgen wieder.' als titel/empfehlung zurueck.",
             "AKTIVITAETEN: distance_km = absolute Distanz der letzten Aktivitaet, training_effect_score = aerober/anaerober Reiz-Score (1-5). Verwechsle diese NICHT!",
+            f"TRAININGSBELASTUNG: acute_training_load={training_load_acute} - Falls hoch (z.B. > 200), reduziere empfohlene Intensitaet um 2-3 Punkte.",
+            f"TRAININGSBALANCE: training_balance_feedback='{training_balance_feedback}' - Falls 'AEROBIC_HIGH_SHORTAGE': empfehle High Intensity Aerobic wenn passt zu Ziel. Falls 'AEROBIC_LOW_SHORTAGE': empfehle Low Intensity Aerobic. Falls 'ANAEROBIC': empfehle Kraft/Anaerobic Reiz.",
             "Wenn die Daten gut sind und das Ziel Marathon ist, bevorzuge einen konkreten Longrun, Tempolauf oder Lauftechnik-Session statt einer allgemeinen Regel.",
             "Keine Lauf-Intervalle fuer Rollstuhlfahrer; stattdessen Handbike oder Oberkoerper-Kraft-Ausdauer.",
             "Outdoor bevorzugen, wenn die Erholung nicht kritisch ist.",
@@ -586,6 +602,7 @@ def generate_coach_recommendation(
     daily_stats: dict[str, Any] | None = None,
     activities: list[dict[str, Any]] | None = None,
     refresh: bool = False,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     if daily_stats is None or activities is None:
         loaded_stats, loaded_activities = load_coach_inputs()
@@ -593,7 +610,7 @@ def generate_coach_recommendation(
         activities = activities or loaded_activities
 
     if not refresh:
-        cached_recommendation = _load_cached_recommendation()
+        cached_recommendation = _load_cached_recommendation(user_id=user_id)
         if cached_recommendation is not None:
             return cached_recommendation
 
@@ -608,7 +625,7 @@ def generate_coach_recommendation(
             recommendation = _enrich_recommendation(recommendation, profile, daily_stats, activities)
             recommendation["source"] = "model"
             recommendation["model_attempt"] = attempt
-            _save_cached_recommendation(recommendation)
+            _save_cached_recommendation(recommendation, user_id=user_id)
             return recommendation
         except Exception as exc:
             last_error = exc
@@ -621,7 +638,7 @@ def generate_coach_recommendation(
     recommendation["source"] = "local"
     if last_error is not None:
         recommendation["fallback_reason"] = f"Provider-Fehler nach 3 Versuchen: {str(last_error)[:220]}"
-    _save_cached_recommendation(recommendation)
+    _save_cached_recommendation(recommendation, user_id=user_id)
     return recommendation
 
 
@@ -631,6 +648,7 @@ def get_coach_recommendation(
     activities: list[dict[str, Any]] | None = None,
     refresh: bool = False,
     model_name: str = DEFAULT_GROQ_MODEL_NAME,
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     if daily_stats is None or activities is None:
         loaded_stats, loaded_activities = load_coach_inputs()
@@ -638,7 +656,7 @@ def get_coach_recommendation(
         activities = activities or loaded_activities
 
     if not refresh:
-        cached_recommendation = _load_cached_recommendation()
+        cached_recommendation = _load_cached_recommendation(user_id=user_id)
         if cached_recommendation is not None:
             return cached_recommendation
 
@@ -650,8 +668,10 @@ def get_coach_recommendation(
         _save_cached_recommendation(recommendation)
         return recommendation
 
-    recommendation = generate_coach_recommendation(profile, client, daily_stats, activities, refresh=refresh)
-    _save_cached_recommendation(recommendation)
+    recommendation = generate_coach_recommendation(
+        profile, client, daily_stats, activities, refresh=refresh, user_id=user_id
+    )
+    _save_cached_recommendation(recommendation, user_id=user_id)
     return recommendation
 
 

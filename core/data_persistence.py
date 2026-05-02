@@ -50,6 +50,23 @@ def save_daily_stats(data: dict[str, Any], user_id: str | None = None) -> Path:
     return filename
 
 
+def delete_daily_stat(date_key: str, user_id: str | None = None) -> Path:
+    """Delete a daily stat entry by date key for a specific user."""
+    filename = _resolve_file("daily_stats.json", user_id=user_id)
+    if not filename.exists():
+        return filename
+
+    try:
+        existing = json.loads(filename.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        existing = {}
+
+    if isinstance(existing, dict) and date_key in existing:
+        existing.pop(date_key, None)
+        filename.write_text(json.dumps(existing, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    return filename
+
+
 def save_activities(data: list[dict[str, Any]], user_id: str | None = None) -> Path:
     """Save 7-activity history to JSON file."""
     filename = _resolve_file("activities.json", user_id=user_id)
@@ -61,6 +78,28 @@ def save_activities(data: list[dict[str, Any]], user_id: str | None = None) -> P
     
     json_str = json.dumps(output, indent=2, ensure_ascii=False, default=str)
     filename.write_text(json_str, encoding="utf-8")
+    return filename
+
+
+def delete_activity(activity_id: str, user_id: str | None = None) -> Path:
+    """Delete an activity entry by id for a specific user."""
+    filename = _resolve_file("activities.json", user_id=user_id)
+    if not filename.exists():
+        return filename
+
+    try:
+        payload = json.loads(filename.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        payload = {}
+
+    activities = payload.get("activities", []) if isinstance(payload, dict) else []
+    if not isinstance(activities, list):
+        activities = []
+
+    filtered = [item for item in activities if str(item.get("id", "")) != str(activity_id)]
+    payload["activities"] = filtered
+    payload["last_updated"] = datetime.now().isoformat()
+    filename.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
     return filename
 
 
@@ -115,3 +154,71 @@ def load_user_profile(user_id: str | None = None) -> dict[str, Any]:
         return profile if isinstance(profile, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def save_garmin_credentials(credentials: dict[str, Any], user_id: str | None = None) -> Path:
+    """Save Garmin login credentials for a specific user.
+
+    Credentials are stored locally in the user's data folder.
+    """
+    filename = _resolve_file("garmin_credentials.json", user_id=user_id)
+    output = {
+        "last_updated": datetime.now().isoformat(),
+        "credentials": credentials,
+    }
+    filename.write_text(json.dumps(output, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    return filename
+
+
+def load_garmin_credentials(user_id: str | None = None) -> dict[str, Any]:
+    """Load stored Garmin login credentials for a specific user."""
+    filename = _resolve_file("garmin_credentials.json", user_id=user_id)
+
+    if not filename.exists():
+        return {}
+
+    try:
+        data = json.loads(filename.read_text(encoding="utf-8"))
+        credentials = data.get("credentials", {})
+        return credentials if isinstance(credentials, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def save_coach_recommendation(recommendation: dict[str, Any], user_id: str | None = None) -> Path:
+    """Save a cached coach recommendation for a specific user.
+
+    The payload includes a generated timestamp and the recommendation dict.
+    """
+    filename = _resolve_file("coach_recommendation.json", user_id=user_id)
+    payload = {
+        "generated_at": datetime.now().isoformat(),
+        "recommendation": recommendation,
+    }
+    filename.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    return filename
+
+
+def load_coach_recommendation(user_id: str | None = None) -> dict[str, Any] | None:
+    """Load a cached coach recommendation for a specific user, or return None."""
+    filename = _resolve_file("coach_recommendation.json", user_id=user_id)
+    if not filename.exists():
+        return None
+    try:
+        payload = json.loads(filename.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    recommendation = payload.get("recommendation")
+    generated_at = payload.get("generated_at")
+    if not recommendation or not generated_at:
+        return None
+    try:
+        # Validate ISO timestamp
+        _ = datetime.fromisoformat(str(generated_at))
+    except Exception:
+        return None
+    return payload
