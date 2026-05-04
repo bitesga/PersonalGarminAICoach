@@ -42,9 +42,11 @@ from web.sidebar import init_state as init_sidebar_state, render_sidebar as rend
 from datetime import datetime, timedelta
 
 
+LOGO_PATH = ROOT_DIR / "images" / "fit_heart.png"
+
 st.set_page_config(
     page_title="Personal Garmin AI Coach",
-    page_icon="🏁",
+    page_icon=str(LOGO_PATH) if LOGO_PATH.exists() else "🏁",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -146,9 +148,9 @@ st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
 DASHBOARD_DEFAULTS: dict[str, Any] = {
-    "mobility": "Gesund",
+    "mobility": "Healthy",
     "preference": "",
-    "goal": "Kraft und Ausdauer maximieren",
+    "goal": "Build Strength and Endurance",
     "notify_discord": False,
     "discord_user_id": "",
     "notify_email": False,
@@ -157,8 +159,8 @@ DASHBOARD_DEFAULTS: dict[str, Any] = {
     "linked_discord_id": "",
 }
 
-MOBILITY_OPTIONS = ["Gesund", "Rollstuhl", "Leichte Einschränkungen"]
-GOAL_OPTIONS = ["Kraft und Ausdauer maximieren", "Ausdauer Fokus", "Kraft Fokus"]
+MOBILITY_OPTIONS = ["Healthy", "Wheelchair", "Minor limitations"]
+GOAL_OPTIONS = ["Build Strength and Endurance", "Endurance Focus", "Strength Focus"]
 
 
 def _request_verification_compat(discord_id: str) -> dict[str, Any]:
@@ -234,7 +236,7 @@ def _format_training_effect(activity_type: str, primary_metric: Any) -> str:
     # For cardio/endurance, primary_metric is training effect score (Garmin scale)
     try:
         effect = float(primary_metric)
-        effect_label = "Anaerob" if effect >= 5.0 else "Aerob"
+        effect_label = "Anaerobic" if effect >= 5.0 else "Aerobic"
         return f"{effect_label} ({effect:.2f})"
     except (TypeError, ValueError):
         return str(primary_metric)[:40] if primary_metric else "n/a"
@@ -247,7 +249,7 @@ def _get_last_fetch_timestamp() -> str:
     activities_file = data_dir / "activities.json"
     
     if not activities_file.exists():
-        return "Noch nie geladen"
+        return "Never loaded"
     
     try:
         data = json.loads(activities_file.read_text(encoding="utf-8"))
@@ -258,7 +260,7 @@ def _get_last_fetch_timestamp() -> str:
     except Exception:
         pass
     
-    return "Unbekannt"
+    return "Unknown"
 
 
 
@@ -277,17 +279,22 @@ def _normalize_choice(value: Any, options: list[str], default_value: str) -> str
     lowered = candidate.lower()
     if options == MOBILITY_OPTIONS:
         if "rollstuhl" in lowered or "wheelchair" in lowered:
-            return "Rollstuhl"
-        if "einschr" in lowered or "behind" in lowered:
-            return "Leichte Einschränkungen"
-        return "Gesund"
+            return "Wheelchair"
+        if "einschr" in lowered or "behind" in lowered or "limitation" in lowered:
+            return "Minor limitations"
+        return "Healthy"
     if options == GOAL_OPTIONS:
-        if "kraft und ausdauer" in lowered or ("kraft" in lowered and "ausdauer" in lowered):
-            return "Kraft und Ausdauer maximieren"
-        if "ausdauer" in lowered or "marathon" in lowered or "laufen" in lowered:
-            return "Ausdauer Fokus"
-        if "kraft" in lowered:
-            return "Kraft Fokus"
+        if (
+            "build strength and endurance" in lowered
+            or "strength and endurance" in lowered
+            or "kraft und ausdauer" in lowered
+            or ("kraft" in lowered and "ausdauer" in lowered)
+        ):
+            return "Build Strength and Endurance"
+        if "endurance" in lowered or "ausdauer" in lowered or "marathon" in lowered or "laufen" in lowered:
+            return "Endurance Focus"
+        if "strength" in lowered or "kraft" in lowered:
+            return "Strength Focus"
     return default_value
 
 
@@ -313,7 +320,7 @@ def _init_state(user_id: str) -> None:
         st.session_state.refresh_recommendation = False
     if "trigger_notification_on_refresh" not in st.session_state:
         st.session_state.trigger_notification_on_refresh = False
-    st.session_state.setdefault("coach_status_lines", ["Bereit."])
+    st.session_state.setdefault("coach_status_lines", ["Ready."])
     st.session_state.setdefault("coach_status_level", "info")
     # Verification state: check if user has verified discord_user_id
     st.session_state.setdefault("discord_verified", bool(profile.get("discord_user_id", "").strip()))
@@ -327,7 +334,7 @@ def _set_coach_status(lines: list[str], level: str = "info") -> None:
 def _render_coach_status(container: Any) -> None:
     lines = st.session_state.get("coach_status_lines", [])
     level = st.session_state.get("coach_status_level", "info")
-    message = "\n".join(lines) if lines else "Bereit."
+    message = "\n".join(lines) if lines else "Ready."
 
     if level == "success":
         container.success(message)
@@ -378,7 +385,7 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
     try:
         result = subprocess.run(command, capture_output=True, text=True, cwd=str(ROOT_DIR), check=False)
     except Exception as exc:
-        return False, f"Reload fehlgeschlagen: {exc}"
+        return False, f"Reload failed: {exc}"
 
     output_parts = []
     if result.stdout.strip():
@@ -386,7 +393,7 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
     if result.stderr.strip():
         output_parts.append(result.stderr.strip())
 
-    combined_output = "\n\n".join(output_parts) if output_parts else "Garmin-Daten wurden neu geladen."
+    combined_output = "\n\n".join(output_parts) if output_parts else "Garmin data was refreshed."
     return result.returncode == 0, combined_output
 
 
@@ -423,50 +430,50 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
     registered_via_email = str(user_id).startswith("email:")
 
     with st.sidebar:
-        st.markdown("### Zugang & Profil")
+        st.markdown("### Access & Profile")
         st.selectbox(
-            "Mobilität",
+            "Mobility",
             MOBILITY_OPTIONS,
             key="mobility_config",
-            help="Wähle den Mobilitätstyp, der deine Trainingsauswahl steuert.",
+            help="Choose the mobility profile that guides training selection.",
         )
         st.selectbox(
-            "Trainingsziel",
+            "Training goal",
             GOAL_OPTIONS,
             key="goal_config",
-            help="Das Ziel wird zur Auswahl der passenden Einheit verwendet.",
+            help="The goal is used to select the most suitable session.",
         )
         st.text_area(
-            "Sonstig zu berücksichtigende Aspekte",
+            "Other considerations",
             key="preference_config",
             height=96,
-            placeholder="z. B. ich trage gerne sonnenbrille, keine harten Sprints, lieber morgens trainieren",
-            help="Zusätzliche Hinweise, die der Coach bei der Empfehlung berücksichtigen soll.",
+            placeholder="e.g., no hard sprints, prefer mornings, outdoor only",
+            help="Extra notes the coach should consider.",
         )
         st.markdown("---")
         st.markdown("### Coach")
-        reload_clicked = st.button("Garmin-Daten neu laden", use_container_width=True)
-        refresh_clicked = st.button("Empfehlung neu laden (KI)", use_container_width=True)
+        reload_clicked = st.button("Refresh Garmin data", use_container_width=True)
+        refresh_clicked = st.button("Refresh recommendation (AI)", use_container_width=True)
         status_box = st.empty()
         _render_coach_status(status_box)
         if reload_clicked:
-            _set_coach_status(["Garmin-Daten werden neu geladen..."], "info")
-            with st.spinner("Garmin-Daten werden neu geladen..."):
+            _set_coach_status(["Refreshing Garmin data..."], "info")
+            with st.spinner("Refreshing Garmin data..."):
                 success, message = _reload_garmin_data(user_id)
             if success:
-                st.success("Garmin-Daten wurden aktualisiert.")
-                st.info(f"Neu geladen: {_get_last_fetch_timestamp()}")
+                st.success("Garmin data updated.")
+                st.info(f"Last refresh: {_get_last_fetch_timestamp()}")
                 _set_coach_status(
                     [
-                        "Garmin-Daten wurden aktualisiert.",
-                        "KI wird neu konsultiert...",
+                        "Garmin data updated.",
+                        "Re-querying AI...",
                     ],
                     "info",
                 )
             else:
-                st.error("Garmin-Daten konnten nicht neu geladen werden.")
-                _set_coach_status(["Fehler beim Garmin-Reload.", message], "error")
-            with st.expander("Reload-Ausgabe", expanded=not success):
+                st.error("Garmin data could not be refreshed.")
+                _set_coach_status(["Garmin refresh failed.", message], "error")
+            with st.expander("Reload output", expanded=not success):
                 st.code(message, language="text")
             st.session_state.refresh_recommendation = True
             st.session_state.trigger_notification_on_refresh = True
@@ -474,55 +481,55 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
         if refresh_clicked:
             st.session_state.refresh_recommendation = True
             st.session_state.trigger_notification_on_refresh = True
-            _set_coach_status(["KI wird gefragt..."], "info")
+            _set_coach_status(["Querying AI..."], "info")
             st.rerun()
 
         st.markdown("---")
-        st.markdown("### Konten & Benachrichtigungen")
+        st.markdown("### Accounts & Notifications")
         st.markdown("#### Discord")
         # Consider a Discord ID linked when `discord_user_id_config` is present
         discord_already_linked = bool(str(st.session_state.get("discord_user_id_config", "")).strip())
         if registered_via_email:
             if discord_already_linked:
-                st.toggle("Discord DM senden", key="notify_discord_config")
+                st.toggle("Send Discord DM", key="notify_discord_config")
                 # Show the already linked Discord ID clearly (read-only)
                 # Show the already linked Discord ID (read-only)
                 st.text_input(
-                    "Discord User-ID",
+                    "Discord user ID",
                     key="discord_user_id_config",
-                    help="Empfaenger-ID fuer Discord DM via Bot-Token.",
+                    help="Recipient ID for Discord DMs via bot token.",
                     disabled=True,
                 )
-                st.caption("Discord ist bereits verknüpft.")
+                st.caption("Discord is already linked.")
             else:
                 st.text_input(
-                    "Discord User-ID zum Verknüpfen",
+                    "Discord user ID to link",
                     key="link_discord_target_config",
-                    help="An diese Discord-ID wird ein 6-stelliger Link-Code gesendet.",
+                    help="A 6-digit link code will be sent to this Discord ID.",
                 )
-                if st.button("Code an Discord senden", use_container_width=True, key="send_link_discord_code_btn"):
+                if st.button("Send code to Discord", use_container_width=True, key="send_link_discord_code_btn"):
                     target_discord_id = str(st.session_state.link_discord_target_config).strip()
                     if not target_discord_id:
-                        st.error("Bitte eine Discord User-ID eingeben.")
+                        st.error("Please enter a Discord user ID.")
                     else:
                         link_user = user_management.request_contact_link(user_id, "discord", target_discord_id)
                         code = str(link_user.get("pending_link", {}).get("verification_code", "")).strip()
                         if not code:
-                            st.error("Konnte keinen Link-Code erzeugen.")
+                            st.error("Could not generate a link code.")
                         else:
                             sent, msg = send_verification_dm(target_discord_id, code)
                             if sent:
-                                st.success("Link-Code per Discord-DM gesendet.")
+                                st.success("Link code sent via Discord DM.")
                             else:
-                                st.error(f"Fehler beim Discord-Versand: {msg}")
-                st.text_input("Link-Code Discord", key="link_discord_code_config", help="6-stelligen Code aus Discord eingeben.")
-                if st.button("Discord verknüpfen", use_container_width=True, key="verify_link_discord_code_btn"):
+                                st.error(f"Discord send failed: {msg}")
+                st.text_input("Discord link code", key="link_discord_code_config", help="Enter the 6-digit code from Discord.")
+                if st.button("Link Discord", use_container_width=True, key="verify_link_discord_code_btn"):
                     target_discord_id = str(st.session_state.link_discord_target_config).strip()
                     code = str(st.session_state.link_discord_code_config).strip()
                     if not target_discord_id:
-                        st.error("Bitte zuerst die Discord User-ID angeben.")
+                        st.error("Please enter the Discord user ID first.")
                     elif not code:
-                        st.error("Bitte den Link-Code eingeben.")
+                        st.error("Please enter the link code.")
                     else:
                         ok = user_management.verify_contact_link(user_id, "discord", target_discord_id, code)
                         if ok:
@@ -532,66 +539,66 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                             save_user_profile(profile, user_id=user_id)
                             st.session_state.discord_user_id_config = target_discord_id
                             st.session_state.notify_discord_config = True
-                            st.success("Discord erfolgreich verknüpft.")
+                            st.success("Discord linked successfully.")
                         else:
-                            st.error("Link-Code ist ungültig oder abgelaufen.")
+                            st.error("Link code is invalid or expired.")
         else:
-            st.toggle("Discord DM senden", key="notify_discord_config")
-            st.text_input("Discord User-ID", key="discord_user_id_config", help="Empfaenger-ID fuer Discord DM via Bot-Token.")
-            st.caption("Mit Discord registriert.")
+            st.toggle("Send Discord DM", key="notify_discord_config")
+            st.text_input("Discord user ID", key="discord_user_id_config", help="Recipient ID for Discord DMs via bot token.")
+            st.caption("Registered with Discord.")
 
         st.markdown("#### Email")
         # Consider email linked when `email_config` is set
         email_already_linked = bool(str(st.session_state.get("email_config", "")).strip())
         if registered_via_email:
-            st.toggle("Email-Benachrichtigung senden", key="notify_email_config")
+            st.toggle("Send email notifications", key="notify_email_config")
             st.text_input(
-                "Email-Adresse",
+                "Email address",
                 key="email_config",
-                help="Email-Adresse für tägliche Trainingsempfehlungen mit HTML-Formatierung.",
+                help="Email address for daily recommendations with HTML formatting.",
                 disabled=email_already_linked,
             )
-            st.caption("Mit Email registriert.")
+            st.caption("Registered with email.")
         else:
             if email_already_linked:
-                st.toggle("Email-Benachrichtigung senden", key="notify_email_config")
-                st.text_input("Email-Adresse", key="email_config", help="Email-Adresse für tägliche Trainingsempfehlungen mit HTML-Formatierung.")
-                st.caption("Email ist bereits verknüpft.")
+                st.toggle("Send email notifications", key="notify_email_config")
+                st.text_input("Email address", key="email_config", help="Email address for daily recommendations with HTML formatting.")
+                st.caption("Email is already linked.")
             else:
                 st.text_input(
-                    "Email zum Verknüpfen",
+                    "Email to link",
                     key="link_email_target_config",
-                    help="An diese Adresse wird ein 6-stelliger Link-Code gesendet.",
+                    help="A 6-digit link code will be sent to this address.",
                 )
-                if st.button("Code an Email senden", use_container_width=True, key="send_link_email_code_btn"):
+                if st.button("Send code to email", use_container_width=True, key="send_link_email_code_btn"):
                     target_email = str(st.session_state.link_email_target_config).strip().lower()
                     if not target_email:
-                        st.error("Bitte eine Email-Adresse eingeben.")
+                        st.error("Please enter an email address.")
                     else:
                         link_user = user_management.request_contact_link(user_id, "email", target_email)
                         code = str(link_user.get("pending_link", {}).get("verification_code", "")).strip()
                         if not code:
-                            st.error("Konnte keinen Link-Code erzeugen.")
+                            st.error("Could not generate a link code.")
                         else:
-                            subject = "Dein Link-Code für PersonalGarminAICoach"
+                            subject = "Your link code for PersonalGarminAICoach"
                             text = (
-                                f"Dein Link-Code für die Verknüpfung mit deinem Account ist: {code}\n\n"
-                                "Gib diesen Code in der App ein, um die Email für Benachrichtigungen zu verknüpfen."
+                                f"Your link code for connecting your account is: {code}\n\n"
+                                "Enter this code in the app to link your email for notifications."
                             )
-                            html = f"<p>Dein Link-Code für die Verknüpfung mit deinem Account ist: <strong>{code}</strong></p>"
+                            html = f"<p>Your link code for connecting your account is: <strong>{code}</strong></p>"
                             sent, msg = send_email(subject=subject, body_text=text, body_html=html, recipient_email=target_email)
                             if sent:
-                                st.success("Link-Code per Email gesendet.")
+                                st.success("Link code sent via email.")
                             else:
-                                st.error(f"Fehler beim Email-Versand: {msg}")
-                st.text_input("Link-Code Email", key="link_email_code_config", help="6-stelligen Code aus der Email eingeben.")
-                if st.button("Email verknüpfen", use_container_width=True, key="verify_link_email_code_btn"):
+                                st.error(f"Email send failed: {msg}")
+                st.text_input("Email link code", key="link_email_code_config", help="Enter the 6-digit code from the email.")
+                if st.button("Link email", use_container_width=True, key="verify_link_email_code_btn"):
                     target_email = str(st.session_state.link_email_target_config).strip().lower()
                     code = str(st.session_state.link_email_code_config).strip()
                     if not target_email:
-                        st.error("Bitte zuerst die Email-Adresse angeben.")
+                        st.error("Please enter the email address first.")
                     elif not code:
-                        st.error("Bitte den Link-Code eingeben.")
+                        st.error("Please enter the link code.")
                     else:
                         ok = user_management.verify_contact_link(user_id, "email", target_email, code)
                         if ok:
@@ -603,17 +610,17 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                             st.session_state.linked_email_config = target_email
                             st.session_state.email_config = target_email
                             st.session_state.notify_email_config = True
-                            st.success("Email erfolgreich verknüpft.")
+                            st.success("Email linked successfully.")
                         else:
-                            st.error("Link-Code ist ungültig oder abgelaufen.")
+                            st.error("Link code is invalid or expired.")
 
         st.markdown("---")
-        save_clicked = st.button("Profil speichern", use_container_width=True)
+        save_clicked = st.button("Save profile", use_container_width=True)
         if save_clicked:
             _save_profile_from_sidebar(user_id=user_id)
-            st.success("Profil gespeichert")
+            st.success("Profile saved")
 
-        logout_clicked = st.button("Logout", use_container_width=True)
+        logout_clicked = st.button("Log out", use_container_width=True)
         if logout_clicked:
             st.session_state.discord_verified = False
             _clear_auth_query_param()
@@ -621,7 +628,7 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
             st.session_state.pop("temp_discord_id", None)
             st.session_state.pop("temp_code_input", None)
             st.session_state.pop("temp_code_sent", None)
-            st.info("Du wurdest abgemeldet. Bitte registriere dich erneut.")
+            st.info("You have been logged out. Please register again.")
             st.rerun()
 
     return _save_profile_from_sidebar(user_id=user_id), status_box
@@ -786,12 +793,22 @@ def _render_summary_cards(daily_stats: dict[str, Any], activities: list[dict[str
 
     cols = st.columns(6)
     metrics = [
-        ("Sleep", sleep_score, "/100", "Score der letzten Nacht. Der Garmin Sleep Score ist ein Wert von 0 bis 100, der die Schlafqualität basierend auf Dauer, Phasen (Tief-, Leicht-, REM-Schlaf), Stresslevel (HFV) und Unterbrechungen bewertet."),
-        ("Body 🔋", body_battery, "/100", "Energielevel fuer Training"),
-        ("Stress", stress, "HFV/HRV", "Indexwert, der auf der Herzfrequenzvariabilität (HFV/HRV) basiert. Die Uhr analysiert die Abstände zwischen den Herzschlägen (HFV). Eine geringere Variabilität deutet auf höheren Stress hin."),
-        ("VO2Max", vo2_max, "ml/kg/min", "Aussage ueber aerobe Fitness. Maximale Sauerstoffaufnahme."),
-        ("RHR", resting_hr, "bpm", "Ruhepuls"),
-        ("Acute Load", training_load_acute, "load", "Aktuelle Trainingsbelastung"),
+        (
+            "Sleep",
+            sleep_score,
+            "/100",
+            "Score from last night. Garmin Sleep Score is 0-100 based on duration, stages (deep, light, REM), stress (HRV), and interruptions.",
+        ),
+        ("Body 🔋", body_battery, "/100", "Energy available for training."),
+        (
+            "Stress",
+            stress,
+            "HRV",
+            "Index based on heart rate variability (HRV). Lower variability suggests higher stress.",
+        ),
+        ("VO2Max", vo2_max, "ml/kg/min", "Indicator of aerobic fitness. Max oxygen uptake."),
+        ("RHR", resting_hr, "bpm", "Resting heart rate."),
+        ("Acute Load", training_load_acute, "load", "Current training load."),
     ]
 
     for column, (label, value, suffix, help_text) in zip(cols, metrics):
@@ -812,7 +829,7 @@ def _render_summary_cards(daily_stats: dict[str, Any], activities: list[dict[str
         st.markdown(
             f"""
             <div style='margin-top:0.45rem; padding:0.35rem 0.65rem; border-radius:999px; display:inline-block; background:rgba(56, 189, 248, 0.12); border:1px solid rgba(56, 189, 248, 0.24); color:#e2e8f0; font-size:0.98rem; font-weight:800; letter-spacing:0.02em;'>
-                Trainings Reiz Balance: {training_balance_feedback}
+                Training Load Balance: {training_balance_feedback}
             </div>
             """,
             unsafe_allow_html=True,
@@ -823,12 +840,12 @@ def _render_summary_cards(daily_stats: dict[str, Any], activities: list[dict[str
 
 
 def _render_activities(activities: list[dict[str, Any]]) -> None:
-    st.markdown("<h3 class='section-title'>Letzte Aktivitäten</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 class='section-title'>Recent Activities</h3>", unsafe_allow_html=True)
     last_fetch = _get_last_fetch_timestamp()
-    st.caption(f"Letzte Aktualisierung: {last_fetch}")
+    st.caption(f"Last updated: {last_fetch}")
     
     if not activities:
-        st.info("Keine Aktivitäten gefunden.")
+        st.info("No activities found.")
         return
 
     rows = []
@@ -846,29 +863,35 @@ def _render_activities(activities: list[dict[str, Any]]) -> None:
 
         rows.append(
             {
-                "Datum": display_date,
-                "Typ": activity.get("activity_type", "n/a"),
-                "Trainingseffekt": _format_training_effect(
+                "Date": display_date,
+                "Type": activity.get("activity_type", "n/a"),
+                "Training Effect": _format_training_effect(
                     activity.get("activity_type", ""),
                     activity.get("primary_metric", "n/a")
                 ),
-                "Dauer": _format_duration(activity.get("duration", "n/a")),
-                "Kalorien": f"{activity.get('calories', 'n/a'):.0f}" if isinstance(activity.get('calories'), (int, float)) else "n/a",
-                "Distanz": _format_distance(activity.get("distance", "n/a")) if activity.get("distance") else "—",
+                "Duration": _format_duration(activity.get("duration", "n/a")),
+                "Calories": f"{activity.get('calories', 'n/a'):.0f}" if isinstance(activity.get('calories'), (int, float)) else "n/a",
+                "Distance": _format_distance(activity.get("distance", "n/a")) if activity.get("distance") else "—",
             }
         )
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
 def _render_recommendation(recommendation: dict[str, Any]) -> None:
-    st.markdown("<h3 class='section-title'>Empfehlung für das nächste Training</h3>", unsafe_allow_html=True)
+    st.markdown("<h3 class='section-title'>Next Training Recommendation</h3>", unsafe_allow_html=True)
+    title = recommendation.get("title") or recommendation.get("titel") or "Recommendation"
+    recommendation_text = recommendation.get("recommendation") or recommendation.get("empfehlung") or "n/a"
+    alternative_text = recommendation.get("alternative") or ""
+    intensity = recommendation.get("intensity", recommendation.get("intensitaet", "n/a"))
+    reasoning = recommendation.get("reasoning") or recommendation.get("begruendung") or "n/a"
     st.markdown(
         f"""
-        <div class='card reco-box'>
-          <div class='reco-title'>{recommendation.get('titel', 'Empfehlung')}</div>
-          <div class='reco-meta'>Intensität {recommendation.get('intensitaet', 'n/a')}/10 · Quelle {recommendation.get('source', 'model')}</div>
-          <p><strong>Empfehlung:</strong> {recommendation.get('empfehlung', 'n/a')}</p>
-          <p><strong>Begründung:</strong> {recommendation.get('begruendung', 'n/a')}</p>
-        </div>
+                <div class='card reco-box'>
+                    <div class='reco-title'>{title}</div>
+                    <div class='reco-meta'>Intensity {intensity}/10 · Source {recommendation.get('source', 'model')}</div>
+                    <p><strong>Recommendation:</strong> {recommendation_text}</p>
+                    <p><strong>Alternative:</strong> {alternative_text or '-'}</p>
+                    <p><strong>Reasoning:</strong> {reasoning}</p>
+                </div>
         """,
         unsafe_allow_html=True,
     )
@@ -879,8 +902,8 @@ def _render_recommendation(recommendation: dict[str, Any]) -> None:
 
 def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
     """Render the Data Sources tab with Garmin OAuth and manual entry forms."""
-    st.markdown("## Datenquellen")
-    st.write("Verbinde dein Garmin-Gerät oder trag Daten manuell ein.")
+    st.markdown("## Data Sources")
+    st.write("Connect your Garmin device or enter data manually.")
     st.write("")
     _render_flash_message()
     
@@ -893,19 +916,19 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
     if credentials is not None:
         try:
             save_garmin_credentials(credentials, user_id=user_id)
-            _set_flash_message("Garmin-Account erfolgreich verbunden und gespeichert.")
+            _set_flash_message("Garmin account connected and saved.")
             st.rerun()
         except Exception as exc:
-            st.error(f"Fehler beim Speichern der Garmin-Zugangsdaten: {exc}")
+            st.error(f"Failed to save Garmin credentials: {exc}")
     st.markdown("---")
     
     # Manual health entry
-    st.markdown("### Manuelle Daten eingeben")
-    tab_health, tab_activity = st.tabs(["Gesundheitsdaten", "Aktivität"])
+    st.markdown("### Manual data entry")
+    tab_health, tab_activity = st.tabs(["Health metrics", "Activity"])
     
     with tab_health:
         health_data = data_entry.render_manual_health_entry()
-        if st.button("Gesundheitsdaten speichern", key="save_health_btn"):
+        if st.button("Save health metrics", key="save_health_btn"):
             try:
                 # Convert date to dict key format
                 date_key = health_data.get("date", "")
@@ -913,10 +936,10 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
                 health_entry["source"] = "manual"
                 health_dict = {date_key: health_entry}
                 save_daily_stats(health_dict, user_id=user_id)
-                _set_flash_message(f"Gesundheitsdaten für {date_key} gespeichert.")
+                _set_flash_message(f"Health metrics saved for {date_key}.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Fehler beim Speichern: {exc}")
+                st.error(f"Failed to save: {exc}")
     
     with tab_activity:
         activity_data = data_entry.render_manual_activity_entry()
@@ -929,13 +952,13 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
                 activity_data.setdefault("id", f"manual-{datetime.now().isoformat(timespec='seconds')}")
                 current_activities.insert(0, activity_data)
                 save_activities(current_activities, user_id=user_id)
-                _set_flash_message(f"Aktivität ({activity_data.get('activity_type')}) gespeichert.")
+                _set_flash_message(f"Activity ({activity_data.get('activity_type')}) saved.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Fehler beim Speichern: {exc}")
+                st.error(f"Failed to save: {exc}")
 
     st.markdown("---")
-    st.markdown("### Manuelle Einträge löschen")
+    st.markdown("### Delete manual entries")
 
     current_daily_stats = load_daily_stats(user_id=user_id)
     manual_health_entries = [
@@ -952,38 +975,38 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
 
     delete_col1, delete_col2 = st.columns(2)
     with delete_col1:
-        st.markdown("#### Gesundheitsdaten")
+        st.markdown("#### Health metrics")
         if manual_health_entries:
             health_labels = [
                 f"{date_key} · {str(entry.get('time', ''))[:5] if entry.get('time') else '--'}"
                 for date_key, entry in manual_health_entries
             ]
-            selected_health_label = st.selectbox("Eintrag auswählen", health_labels, key="delete_health_select")
+            selected_health_label = st.selectbox("Select entry", health_labels, key="delete_health_select")
             selected_health_index = health_labels.index(selected_health_label)
             selected_health_date = manual_health_entries[selected_health_index][0]
-            if st.button("Gesundheitsdaten löschen", key="delete_health_btn"):
+            if st.button("Delete health metrics", key="delete_health_btn"):
                 delete_daily_stat(selected_health_date, user_id=user_id)
-                _set_flash_message(f"Gesundheitsdaten für {selected_health_date} gelöscht.")
+                _set_flash_message(f"Health metrics deleted for {selected_health_date}.")
                 st.rerun()
         else:
-            st.info("Keine manuellen Gesundheitsdaten vorhanden.")
+            st.info("No manual health metrics available.")
 
     with delete_col2:
-        st.markdown("#### Aktivitäten")
+        st.markdown("#### Activities")
         if manual_activity_entries:
             activity_labels = [
                 f"{activity.get('date', 'n/a')} · {str(activity.get('time', ''))[:5] if activity.get('time') else '--'} · {activity.get('activity_type', 'n/a')}"
                 for activity in manual_activity_entries
             ]
-            selected_activity_label = st.selectbox("Eintrag auswählen", activity_labels, key="delete_activity_select")
+            selected_activity_label = st.selectbox("Select entry", activity_labels, key="delete_activity_select")
             selected_activity_index = activity_labels.index(selected_activity_label)
             selected_activity_id = str(manual_activity_entries[selected_activity_index].get("id", ""))
-            if st.button("Aktivität löschen", key="delete_activity_btn"):
+            if st.button("Delete activity", key="delete_activity_btn"):
                 delete_activity(selected_activity_id, user_id=user_id)
-                _set_flash_message(f"Aktivität {selected_activity_label} gelöscht.")
+                _set_flash_message(f"Activity {selected_activity_label} deleted.")
                 st.rerun()
         else:
-            st.info("Keine manuellen Aktivitäten vorhanden.")
+            st.info("No manual activities available.")
 
 
 def main() -> None:
@@ -1002,16 +1025,16 @@ def main() -> None:
     coach_profile = _build_profile()
     
     # Main tabs
-    tab_dashboard, tab_data_sources = st.tabs(["Dashboard", "Datenquellen"])
+    tab_dashboard, tab_data_sources = st.tabs(["Dashboard", "Data Sources"])
     
     with tab_dashboard:
         refresh = bool(st.session_state.pop("refresh_recommendation", False))
         notify_on_refresh = bool(st.session_state.pop("trigger_notification_on_refresh", False))
 
         if refresh:
-            _set_coach_status(["KI wird gefragt..."], "info")
+            _set_coach_status(["Querying AI..."], "info")
             _render_coach_status(status_box)
-            with st.spinner("KI wird neu konsultiert..."):
+            with st.spinner("Re-querying AI..."):
                 recommendation = _invoke_get_coach_recommendation(
                     profile=coach_profile,
                     daily_stats=daily_stats,
@@ -1019,7 +1042,7 @@ def main() -> None:
                     refresh=True,
                     user_id=active_user_id,
                 )
-            _set_coach_status(["KI-Antwort wird ins Dashboard geladen."], "info")
+            _set_coach_status(["Loading AI response into the dashboard."], "info")
             _render_coach_status(status_box)
         else:
             recommendation = _invoke_get_coach_recommendation(
@@ -1031,7 +1054,7 @@ def main() -> None:
             )
 
         if notify_on_refresh:
-            _set_coach_status(["Notification wird gesendet..."], "info")
+            _set_coach_status(["Sending notification..."], "info")
             _render_coach_status(status_box)
             try:
                 notify_result = notify_recommendation(recommendation, profile, daily_stats=daily_stats)
@@ -1039,31 +1062,31 @@ def main() -> None:
                 notify_result = notify_recommendation(recommendation, profile)
             if notify_result["sent"]:
                 st.success(" | ".join(notify_result["sent"]))
-                _set_coach_status(["Gesendet: " + " | ".join(notify_result["sent"])], "success")
+                _set_coach_status(["Sent: " + " | ".join(notify_result["sent"])], "success")
             for error in notify_result["errors"]:
                 st.error(error)
-                _set_coach_status(["Fehler: " + error], "error")
+                _set_coach_status(["Error: " + error], "error")
 
             if not notify_result["sent"] and not notify_result["errors"]:
                 skipped = notify_result.get("skipped", [])
                 if skipped:
-                    _set_coach_status(["Hinweis: " + skipped[0]], "info")
+                    _set_coach_status(["Note: " + skipped[0]], "info")
 
             if recommendation.get("source") == "local":
-                reason = str(recommendation.get("fallback_reason", "LLM nicht erreichbar oder API-Key fehlt.")).strip()
-                _set_coach_status([f"Lokaler Fallback aktiv: {reason}"], "error")
+                reason = str(recommendation.get("fallback_reason", "LLM unavailable or API key missing.")).strip()
+                _set_coach_status([f"Local fallback active: {reason}"], "error")
 
             _render_coach_status(status_box)
         elif refresh:
             if recommendation.get("source") == "local":
-                reason = str(recommendation.get("fallback_reason", "LLM nicht erreichbar oder API-Key fehlt.")).strip()
-                _set_coach_status([f"Lokaler Fallback aktiv: {reason}"], "error")
+                reason = str(recommendation.get("fallback_reason", "LLM unavailable or API key missing.")).strip()
+                _set_coach_status([f"Local fallback active: {reason}"], "error")
             else:
-                _set_coach_status(["Aktualisierung abgeschlossen."], "success")
+                _set_coach_status(["Refresh complete."], "success")
             _render_coach_status(status_box)
 
         st.markdown(
-            "<div class='hero'><h1>Personal Garmin AI Coach</h1><p>Fitnessdaten, Aktivitäten und die heutige Empfehlung in einem Dashboard. Der Coach nutzt einen 6-Stunden-Cache, damit Token gespart werden.</p></div>",
+            "<div class='hero'><h1>Personal Garmin AI Coach</h1><p>Fitness metrics, activities, and today's recommendation in one dashboard. The coach uses a 6-hour cache to save tokens.</p></div>",
             unsafe_allow_html=True,
         )
         st.write("")
@@ -1071,7 +1094,7 @@ def main() -> None:
         # Only show data and recommendations if we have at least some data
         has_data = bool(daily_stats or activities)
         if not has_data:
-            st.info("📊 Noch keine Daten vorhanden. Gehe zu 'Datenquellen' und verbinde Garmin oder trag manuelle Daten ein.")
+            st.info("📊 No data yet. Go to 'Data Sources' and connect Garmin or enter data manually.")
         else:
             _render_summary_cards(daily_stats, activities)
             st.write("")
@@ -1079,7 +1102,7 @@ def main() -> None:
             _render_activities(activities)
     
     with tab_data_sources:
-        st.markdown(f"**Aktiver Benutzer:** {active_user_id}")
+        st.markdown(f"**Active user:** {active_user_id}")
         st.divider()
         _render_data_sources_tab(profile, user_id=active_user_id)
 

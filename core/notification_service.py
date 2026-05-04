@@ -7,6 +7,7 @@ import os
 import smtplib
 import urllib.error
 import urllib.request
+from datetime import datetime
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -18,10 +19,11 @@ from dotenv import load_dotenv
 
 
 def _build_message(recommendation: dict[str, Any]) -> str:
-    title = str(recommendation.get("titel", "Coach Empfehlung"))
-    intensity = recommendation.get("intensitaet", "n/a")
-    recommendation_text = str(recommendation.get("empfehlung", ""))
-    reasoning = str(recommendation.get("begruendung", ""))
+    title = str(recommendation.get("title") or recommendation.get("titel") or "Coach Recommendation")
+    intensity = recommendation.get("intensity", recommendation.get("intensitaet", "n/a"))
+    recommendation_text = str(recommendation.get("recommendation") or recommendation.get("empfehlung") or "")
+    alternative_text = str(recommendation.get("alternative") or "").strip()
+    reasoning = str(recommendation.get("reasoning") or recommendation.get("begruendung") or "")
     latest_day = recommendation.get("latest_day", {}) if isinstance(recommendation.get("latest_day", {}), dict) else {}
     sleep_score = latest_day.get("sleep_score", "n/a")
     body_battery = latest_day.get("body_battery", "n/a")
@@ -29,26 +31,29 @@ def _build_message(recommendation: dict[str, Any]) -> str:
     vo2_max = latest_day.get("vo2_max", "n/a")
     resting_hr = latest_day.get("resting_heart_rate", "n/a")
 
-    if "Alternative:" in recommendation_text:
+    if not alternative_text and "Alternative:" in recommendation_text:
         main_recommendation, alternative_recommendation = recommendation_text.split("Alternative:", 1)
         main_recommendation = main_recommendation.strip().rstrip(".")
         alternative_recommendation = alternative_recommendation.strip().rstrip(".")
+    elif alternative_text:
+        main_recommendation = recommendation_text.strip()
+        alternative_recommendation = alternative_text.strip().rstrip(".")
     else:
         main_recommendation = recommendation_text.strip()
-        alternative_recommendation = "Keine Alternative vorhanden."
+        alternative_recommendation = "No alternative provided."
 
     body = (
-        f"GUTEN MORGEN SPORTSFREUND!\n\n"
-        f"DEINE TAGESWERTE:\n"
+        f"GOOD MORNING!\n\n"
+        f"TODAY'S METRICS:\n"
         f"SLEEP SCORE: {sleep_score}/100\n"
         f"BODY BATTERY: {body_battery}/100\n"
         f"STRESS: {stress}\n"
         f"VO2MAX: {vo2_max}\n"
         f"RHR: {resting_hr}\n\n"
-        f"HAUPTEMPFEHLUNG: {title}\n{main_recommendation}\n\n"
+        f"MAIN RECOMMENDATION: {title}\n{main_recommendation}\n\n"
         f"ALTERNATIVE:\n{alternative_recommendation}\n\n"
-        f"INTENSITAET: {intensity}/10\n\n"
-        f"BEGRUENDUNG:\n{reasoning}\n"
+        f"INTENSITY: {intensity}/10\n\n"
+        f"REASONING:\n{reasoning}\n"
     )
     return body
 
@@ -118,6 +123,128 @@ def send_discord_dm(message: str, user_id: str) -> tuple[bool, str]:
         return False, f"Discord-Versand fehlgeschlagen: {exc}"
 
 
+def _clip(value: Any, max_len: int) -> str:
+    text = str(value or "")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 1] + "…"
+
+
+def _split_recommendation_text(recommendation_text: str) -> tuple[str, str]:
+    if "Alternative:" in recommendation_text:
+        main_recommendation, alternative_recommendation = recommendation_text.split("Alternative:", 1)
+        main_recommendation = main_recommendation.strip().rstrip(".")
+        alternative_recommendation = alternative_recommendation.strip().rstrip(".")
+        return main_recommendation, alternative_recommendation
+    return recommendation_text.strip(), "No alternative provided."
+
+
+def _build_discord_recommendation_embed(recommendation: dict[str, Any]) -> dict[str, Any]:
+    title = _clip(recommendation.get("title") or recommendation.get("titel") or "Coach Recommendation", 256)
+    intensity = _clip(recommendation.get("intensity") or recommendation.get("intensitaet") or "n/a", 32)
+    recommendation_text = str(recommendation.get("recommendation") or recommendation.get("empfehlung") or "")
+    alternative_text = str(recommendation.get("alternative") or "")
+    reasoning = _clip(recommendation.get("reasoning") or recommendation.get("begruendung") or "", 1024)
+
+    latest_day = recommendation.get("latest_day", {}) if isinstance(recommendation.get("latest_day", {}), dict) else {}
+    sleep_score = _clip(latest_day.get("sleep_score", "n/a"), 24)
+    body_battery = _clip(latest_day.get("body_battery", "n/a"), 24)
+    stress = _clip(latest_day.get("stress", "n/a"), 24)
+    vo2_max = _clip(latest_day.get("vo2_max", "n/a"), 24)
+    resting_hr = _clip(latest_day.get("resting_heart_rate", "n/a"), 24)
+
+    if alternative_text:
+        main_reco, alt_reco = recommendation_text.strip(), alternative_text.strip()
+    else:
+        main_reco, alt_reco = _split_recommendation_text(recommendation_text)
+
+    description = _clip(
+        f"**Main Recommendation**\n{main_reco}\n\n**Alternative**\n{alt_reco}",
+        4096,
+    )
+
+    embed: dict[str, Any] = {
+        "title": f"PersonalGarminAICoach · {title}",
+        "description": description,
+        "color": 0x38BDF8,
+        "fields": [
+            {"name": "Sleep Score", "value": f"{sleep_score}/100", "inline": True},
+            {"name": "Body Battery", "value": f"{body_battery}/100", "inline": True},
+            {"name": "Stress", "value": f"{stress}", "inline": True},
+            {"name": "VO2Max", "value": f"{vo2_max}", "inline": True},
+            {"name": "RHR", "value": f"{resting_hr}", "inline": True},
+            {"name": "Intensity", "value": f"{intensity}/10", "inline": True},
+            {"name": "Reasoning", "value": reasoning or "-", "inline": False},
+        ],
+        "footer": {"text": "Garmin + AI · PersonalGarminAICoach"},
+        "timestamp": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+    }
+    return embed
+
+
+def send_discord_dm_embed(
+    *,
+    user_id: str,
+    embed: dict[str, Any],
+    content: str | None = None,
+) -> tuple[bool, str]:
+    """Send a Discord DM with an embed payload.
+
+    Uses the bot token; falls back to standard error handling.
+    """
+    token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+    if not token:
+        return False, "DISCORD_BOT_TOKEN fehlt."
+    if not user_id:
+        return False, "Discord User-ID fehlt."
+
+    try:
+        channel_resp = _discord_api_post(
+            "https://discord.com/api/v10/users/@me/channels",
+            {"recipient_id": user_id},
+            token,
+        )
+        channel_id = str(channel_resp.get("id", "")).strip()
+        if not channel_id:
+            return False, "Discord DM-Channel konnte nicht erstellt werden."
+
+        payload: dict[str, Any] = {
+            "embeds": [embed],
+        }
+        if content:
+            payload["content"] = _clip(content, 1900)
+
+        _discord_api_post(
+            f"https://discord.com/api/v10/channels/{channel_id}/messages",
+            payload,
+            token,
+        )
+        return True, "Discord-Embed gesendet."
+    except urllib.error.HTTPError as exc:
+        try:
+            error_payload = exc.read().decode("utf-8", errors="ignore")
+        except Exception:
+            error_payload = ""
+        return False, f"Discord API Fehler {exc.code}: {error_payload or exc.reason}"
+    except Exception as exc:
+        return False, f"Discord-Versand fehlgeschlagen: {exc}"
+
+
+def send_discord_recommendation(recommendation: dict[str, Any], user_id: str, fallback_text: str) -> tuple[bool, str]:
+    """Send a daily recommendation as a Discord embed, with plain-text fallback."""
+    embed = _build_discord_recommendation_embed(recommendation)
+    ok, msg = send_discord_dm_embed(user_id=user_id, embed=embed)
+    if ok:
+        return True, msg
+
+    # Fallback to plain DM (some guild DM settings or payload issues can reject embeds)
+    ok2, msg2 = send_discord_dm(fallback_text, user_id)
+    if ok2:
+        return True, f"Embed fehlgeschlagen ({msg}) — Fallback als Text gesendet."
+    return False, f"Embed fehlgeschlagen ({msg}) und Text-Fallback ebenfalls fehlgeschlagen ({msg2})."
+
+
 def send_verification_dm(user_id: str, code: str, invite_link: str | None = None) -> tuple[bool, str]:
     """Send a short verification DM containing the code and optional server invite instructions."""
     if not user_id:
@@ -135,10 +262,11 @@ def send_verification_dm(user_id: str, code: str, invite_link: str | None = None
 
 def _build_message_html(recommendation: dict[str, Any]) -> str:
     """Build an HTML-formatted recommendation message."""
-    title = str(recommendation.get("titel", "Coach Empfehlung"))
-    intensity = recommendation.get("intensitaet", "n/a")
-    recommendation_text = str(recommendation.get("empfehlung", ""))
-    reasoning = str(recommendation.get("begruendung", ""))
+    title = str(recommendation.get("title") or recommendation.get("titel") or "Coach Recommendation")
+    intensity = recommendation.get("intensity", recommendation.get("intensitaet", "n/a"))
+    recommendation_text = str(recommendation.get("recommendation") or recommendation.get("empfehlung") or "")
+    alternative_text = str(recommendation.get("alternative") or "").strip()
+    reasoning = str(recommendation.get("reasoning") or recommendation.get("begruendung") or "")
     latest_day = recommendation.get("latest_day", {}) if isinstance(recommendation.get("latest_day", {}), dict) else {}
     sleep_score = latest_day.get("sleep_score", "n/a")
     body_battery = latest_day.get("body_battery", "n/a")
@@ -146,13 +274,16 @@ def _build_message_html(recommendation: dict[str, Any]) -> str:
     vo2_max = latest_day.get("vo2_max", "n/a")
     resting_hr = latest_day.get("resting_heart_rate", "n/a")
 
-    if "Alternative:" in recommendation_text:
+    if not alternative_text and "Alternative:" in recommendation_text:
         main_recommendation, alternative_recommendation = recommendation_text.split("Alternative:", 1)
         main_recommendation = main_recommendation.strip().rstrip(".")
         alternative_recommendation = alternative_recommendation.strip().rstrip(".")
+    elif alternative_text:
+        main_recommendation = recommendation_text.strip()
+        alternative_recommendation = alternative_text.strip().rstrip(".")
     else:
         main_recommendation = recommendation_text.strip()
-        alternative_recommendation = "Keine Alternative vorhanden."
+        alternative_recommendation = "No alternative provided."
 
     html_body = f"""
     <html>
@@ -163,8 +294,8 @@ def _build_message_html(recommendation: dict[str, Any]) -> str:
         <h1 style="color: #38bdf8; text-align: center;">PersonalGarminAICoach</h1>
         
         <div style="background-color: #f0f9ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <h2 style="color: #38bdf8; margin-top: 0;">Guten Morgen, Sportsfreund! 🏃</h2>
-            <p style="margin: 10px 0;"><strong>Deine heutigen Tageswerte:</strong></p>
+            <h2 style="color: #38bdf8; margin-top: 0;">Good morning! 🏃</h2>
+            <p style="margin: 10px 0;"><strong>Today's metrics:</strong></p>
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
                     <td style="padding: 8px; border-bottom: 1px solid #ccc;"><strong>Sleep Score:</strong></td>
@@ -190,7 +321,7 @@ def _build_message_html(recommendation: dict[str, Any]) -> str:
         </div>
 
         <div style="background-color: #f5f3ff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #a78bfa;">
-            <h2 style="color: #7c3aed; margin-top: 0;">📋 Hauptempfehlung: {title}</h2>
+            <h2 style="color: #7c3aed; margin-top: 0;">📋 Main Recommendation: {title}</h2>
             <p>{main_recommendation}</p>
         </div>
 
@@ -200,9 +331,9 @@ def _build_message_html(recommendation: dict[str, Any]) -> str:
         </div>
 
         <div style="background-color: #ecfdf5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <p><strong>Intensität:</strong> <span style="color: #059669; font-size: 1.2em; font-weight: bold;">{intensity}/10</span></p>
+            <p><strong>Intensity:</strong> <span style="color: #059669; font-size: 1.2em; font-weight: bold;">{intensity}/10</span></p>
             <hr style="border: none; border-top: 1px solid #d1fae5; margin: 15px 0;">
-            <p><strong>Begründung:</strong></p>
+            <p><strong>Reasoning:</strong></p>
             <p style="color: #666; font-style: italic;">{reasoning}</p>
         </div>
 
@@ -310,7 +441,7 @@ def notify_recommendation(
     # Send Discord notification
     if discord_enabled:
         if discord_user_id:
-            success, msg = send_discord_dm(body_text, discord_user_id)
+            success, msg = send_discord_recommendation(enriched_recommendation, discord_user_id, fallback_text=body_text)
             (result["sent"] if success else result["errors"]).append(msg)
         else:
             result["errors"].append("Discord-Benachrichtigung aktiviert, aber keine Discord-ID gespeichert.")

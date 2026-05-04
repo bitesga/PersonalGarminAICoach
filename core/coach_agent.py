@@ -7,6 +7,7 @@ from pathlib import Path
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
@@ -21,9 +22,11 @@ from core.data_persistence import load_coach_recommendation, save_coach_recommen
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+PROMPT_ASSETS_PATH = DATA_DIR / "coach_examples.json"
+LLM_RAW_LOG_PATH = DATA_DIR / "llm_raw_responses.log"
 DEFAULT_GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 CACHE_TTL_HOURS = 6
-# If Body Battery drops under this threshold, recommend an explicit full rest day (Ruhetag)
+# If Body Battery drops under this threshold, recommend an explicit full rest day (Rest Day)
 RUHETAG_BODY_BATTERY_THRESHOLD = 35
 
 @dataclass(frozen=True)
@@ -36,16 +39,16 @@ class CoachProfile:
 
 
 COACH_SYSTEM_PROMPT = (
-    "Du bist ein präziser Fitness-Coach mit ABSOLUTER PRIORITÄT auf Überlastungsschutz. "
-    "Antworte AUSSCHLIESSLICH als JSON mit den Keys titel, empfehlung, intensitaet, begruendung. "
-    "Die Empfehlung MUSS genau die naechste konkrete Einheit oder maximal die naechsten 1-2 Einheiten beschreiben (Dauer, Ablauf, Intensität). "
-    "Keine Wochenplanung, keine Routinen, keine Frequenzangaben wie '2 Mal pro Woche'. "
-    "Nutze konkrete Zahlen und schreibe die Alternative direkt in die Empfehlung mit 'Alternative:'. "
-    "WICHTIG: Wenn Body Battery < 50 ODER Sleep < 60, dann IMMER nur Recovery-Training mit Intensitaet 1-4. "
-    "Die Begründung MUSS explizit auf die aktuellen Gesundheitsdaten Bezug nehmen (Sleep Score, Body Battery, Stress, VO2Max, RHR, letzte Aktivität). "
-    "WICHTIG: Verwende in der Begründung IMMER den exakten Zielnamen aus dem Nutzerprofil. Keine Synonyme oder Abwandlungen. "
-    "Keine allgemeinen Floskeln. "
-    "WICHTIG: Wenn Body Battery um die 35 oder niedriger dann sage auch gerne was in Richtung 'Heute bitte gar kein Training mehr — ruhe dich aus; versuche es morgen wieder.' und gib dies als titel 'Ruhetag' zurück."
+    "You are a precise fitness coach with ABSOLUTE priority on overload protection. "
+    "Reply ONLY as JSON with the keys title, recommendation, alternative, intensity, reasoning. "
+    "The recommendation MUST describe exactly the next concrete session or at most the next 1-2 sessions (duration, structure, intensity). "
+    "No weekly plans, no routines, no frequency statements like '2 times per week'. "
+    "Use concrete numbers and ALWAYS include an alternative as its own key (alternative). "
+    "IMPORTANT: If Body Battery < 50 OR Sleep < 60, then ONLY recovery training with intensity 1-4. "
+    "The reasoning MUST explicitly reference current health data (Sleep Score, Body Battery, Stress, VO2Max, RHR, last activity). "
+    "IMPORTANT: In the reasoning, ALWAYS use the exact goal name from the user profile. No synonyms or paraphrases. "
+    "No generic phrases. "
+    "IMPORTANT: If Body Battery is around 35 or lower, say that no training should be done today and return title 'Rest Day'."
 )
 
 
@@ -60,6 +63,122 @@ def _load_json_file(path: Path, default: Any) -> Any:
         return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return default
+
+
+def _load_prompt_assets() -> dict[str, Any]:
+    payload = _load_json_file(PROMPT_ASSETS_PATH, {})
+    if not isinstance(payload, dict):
+        return {"examples": [], "fallbacks": {}}
+    payload.setdefault("examples", [])
+    payload.setdefault("fallbacks", {})
+    return payload
+
+
+class _SafeFormatDict(dict):
+    def __missing__(self, key: str) -> str:
+        return "n/a"
+
+
+def _format_metric(value: Any, fmt: str | None = None) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if fmt:
+        return format(num, fmt)
+    if num.is_integer():
+        return f"{int(num)}"
+    return f"{num:.1f}"
+
+
+def _build_fallback_context(latest_day: dict[str, Any]) -> dict[str, str]:
+    return {
+        "sleep_score": _format_metric(latest_day.get("sleep_score"), ".0f"),
+        "body_battery": _format_metric(latest_day.get("body_battery"), ".0f"),
+        "stress": _format_metric(latest_day.get("stress")),
+        "vo2_max": _format_metric(latest_day.get("vo2_max")),
+        "resting_heart_rate": _format_metric(latest_day.get("resting_heart_rate")),
+    }
+
+
+def _log_llm_raw_response(raw_text: str) -> None:
+    try:
+        LLM_RAW_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.utcnow().isoformat()
+        payload = {
+            "timestamp": timestamp,
+            "raw_text": raw_text,
+        }
+        with LLM_RAW_LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        # Best-effort logging; ignore any filesystem issues.
+        pass
+
+
+def _select_fallback_template(assets: dict[str, Any], key: str) -> dict[str, Any] | None:
+    fallbacks = assets.get("fallbacks", {})
+    if not isinstance(fallbacks, dict):
+        return None
+    entry = fallbacks.get(key)
+    if isinstance(entry, list) and entry:
+        return random.choice([item for item in entry if isinstance(item, dict)])
+    if isinstance(entry, dict):
+        return entry
+    return None
+
+
+def _render_fallback(key: str, latest_day: dict[str, Any], assets: dict[str, Any]) -> dict[str, Any]:
+    template = _select_fallback_template(assets, key) or {}
+    context = _SafeFormatDict(_build_fallback_context(latest_day))
+    return {
+        "title": str(template.get("title", "Recommendation")).format_map(context),
+        "recommendation": str(template.get("recommendation", "No recommendation available.")).format_map(context),
+        "alternative": str(template.get("alternative", "")).format_map(context),
+        "intensity": template.get("intensity", 5),
+        "reasoning": str(template.get("reasoning", "")).format_map(context),
+    }
+
+
+def _normalize_recommendation_keys(recommendation: dict[str, Any]) -> dict[str, Any]:
+    result = dict(recommendation or {})
+
+    title = result.get("title")
+    if not title:
+        title = result.get("titel")
+
+    recommendation_text = result.get("recommendation")
+    if not recommendation_text:
+        recommendation_text = result.get("empfehlung")
+
+    alternative = result.get("alternative")
+    if not alternative:
+        alt_raw = str(recommendation_text or "")
+        if "Alternative:" in alt_raw:
+            main_reco, alt_reco = alt_raw.split("Alternative:", 1)
+            recommendation_text = main_reco.strip()
+            alternative = alt_reco.strip()
+
+    intensity = result.get("intensity")
+    if intensity is None:
+        intensity = result.get("intensitaet")
+
+    reasoning = result.get("reasoning")
+    if not reasoning:
+        reasoning = result.get("begruendung")
+
+    result.update(
+        {
+            "title": title or "Recommendation",
+            "recommendation": recommendation_text or "",
+            "alternative": alternative or "",
+            "intensity": intensity,
+            "reasoning": reasoning or "",
+        }
+    )
+    return result
 
 
 def load_coach_inputs(data_dir: Path | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -169,16 +288,22 @@ def _compact_activities(activities: list[dict[str, Any]]) -> list[dict[str, Any]
 def _calculate_goal_intensity_baseline(goal: str) -> int:
     """Calculate base intensity for the selected goal, before health state adjustments."""
     goal_lower = goal.lower()
-    if "kraft fokus" in goal_lower:
+    if "strength focus" in goal_lower or "kraft fokus" in goal_lower:
         return 9  # Strength focus should be high intensity
-    if "kraft" in goal_lower and "ausdauer" in goal_lower:
+    if (
+        "build strength and endurance" in goal_lower
+        or "strength and endurance" in goal_lower
+        or "kraft und ausdauer" in goal_lower
+        or ("kraft" in goal_lower and "ausdauer" in goal_lower)
+    ):
         return 7  # Balanced goal is moderate-high intensity
-    if "ausdauer" in goal_lower or "marathon" in goal_lower:
+    if "endurance focus" in goal_lower or "ausdauer" in goal_lower or "marathon" in goal_lower:
         return 7  # Endurance focus is moderate-high intensity
     return 6  # Default fallback
 
 
 def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activities: list[dict[str, Any]]) -> str:
+    assets = _load_prompt_assets()
     goal_intensity_baseline = _calculate_goal_intensity_baseline(profile.goal)
     
     # Determine recovery status for explicit warning in prompt
@@ -214,49 +339,55 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
         "historie_7_tage": _compact_daily_stats(daily_stats),
         "letzte_aktivitaeten": _compact_activities(activities),
         "ausgabeformat": {
-            "titel": "...",
-            "empfehlung": "...",
-            "intensitaet": goal_intensity_baseline if not recovery_low else 3,
-            "begruendung": "...",
+            "title": "...",
+            "recommendation": "...",
+            "alternative": "...",
+            "intensity": goal_intensity_baseline if not recovery_low else 3,
+            "reasoning": "...",
         },
+        "beispiele": assets.get("examples", []),
         "regeln": [
-            "Beschreibe nur die naechste konkrete Einheit oder maximal die naechsten 1-2 Einheiten.",
-            "Erwaehne keine Wochenfrequenz, keinen Plan und keine Routine.",
-            "KRITISCH: Wenn Schlaf < 60 oder Body Battery < 50, dann schlage RECOVERY-TRAINING vor, nie High-Intensity. Empfehle Ruhe, lockeres Gehen, easy Yoga oder maximale Intensitaet 3-4.",
-            f"NOTFALL: recovery_kritisch={recovery_low} - Falls TRUE, IMMER Intensitaet 1-4, egal welches Trainingsziel!",
-            f"NOTFALL_RUHETAG: recovery_ruhetag={recovery_ruhetag} - Falls TRUE, gib exakt 'Ruhetag' mit dem Text 'Heute bitte gar kein Training mehr — ruhe dich aus; versuche es morgen wieder.' als titel/empfehlung zurueck.",
-            "AKTIVITAETEN: distance_km = absolute Distanz der letzten Aktivitaet, training_effect_score = aerober/anaerober Reiz-Score (1-5). Verwechsle diese NICHT!",
-            f"TRAININGSBELASTUNG: acute_training_load={training_load_acute} - Falls hoch (z.B. > 200), reduziere empfohlene Intensitaet um 2-3 Punkte.",
-            f"TRAININGSBALANCE: training_balance_feedback='{training_balance_feedback}' - Falls 'AEROBIC_HIGH_SHORTAGE': empfehle High Intensity Aerobic wenn passt zu Ziel. Falls 'AEROBIC_LOW_SHORTAGE': empfehle Low Intensity Aerobic. Falls 'ANAEROBIC': empfehle Kraft/Anaerobic Reiz.",
-            "Wenn die Daten gut sind und das Ziel Marathon ist, bevorzuge einen konkreten Longrun, Tempolauf oder Lauftechnik-Session statt einer allgemeinen Regel.",
-            "Keine Lauf-Intervalle fuer Rollstuhlfahrer; stattdessen Handbike oder Oberkoerper-Kraft-Ausdauer.",
-            "Outdoor bevorzugen, wenn die Erholung nicht kritisch ist.",
-            "Fuer 'Ausdauer Fokus': Intensitaet sollte 6-8 sein, priorisiere konkrete Lauf- oder Radreiz.",
-            "Fuer 'Kraft Fokus': Intensitaet sollte 8-10 sein (aber NICHT bei niedriger Recovery!), priorisiere konkrete Gym- oder Kraft-Session.",
-            "Fuer 'Kraft und Ausdauer maximieren': Intensitaet sollte 6-8 sein, kombiniere klaren Reiz mit realistischer Alternative.",
-            "KRITISCH: Verwende den exakten Zielnamen \"" + profile.goal + "\" in der Begruendung, nie Synonyme oder Abwandlungen.",
+            "Describe only the next concrete session or at most the next 1-2 sessions.",
+            "No weekly frequency, no plan, no routine.",
+            "CRITICAL: If Sleep < 60 or Body Battery < 50, suggest ONLY recovery training, never high intensity. Recommend rest, easy walk, easy yoga; max intensity 3-4.",
+            f"EMERGENCY: recovery_kritisch={recovery_low} - If TRUE, ALWAYS intensity 1-4 regardless of the training goal.",
+            f"EMERGENCY_RUHETAG: recovery_ruhetag={recovery_ruhetag} - If TRUE, return title 'Rest Day' and explicitly say no training today.",
+            "ACTIVITIES: distance_km = absolute distance of the last activity; training_effect_score = aerobic/anaerobic stimulus score (1-5). Do NOT mix them up.",
+            f"TRAINING LOAD: acute_training_load={training_load_acute} - If high (e.g., > 200), reduce recommended intensity by 2-3 points.",
+            f"TRAINING BALANCE: training_balance_feedback='{training_balance_feedback}' - If 'AEROBIC_HIGH_SHORTAGE': recommend high intensity aerobic if aligned with goal. If 'AEROBIC_LOW_SHORTAGE': recommend low intensity aerobic. If 'ANAEROBIC': recommend strength/anaerobic stimulus.",
+            "If data is strong and goal is Marathon, prefer a concrete long run, tempo run, or technique session over a general rule.",
+            "No running intervals for wheelchair users; suggest handbike or upper-body strength-endurance instead.",
+            "Prefer outdoor sessions when recovery is not critical.",
+            "For 'Endurance Focus': intensity should be 6-8, prioritize a concrete run or bike stimulus.",
+            "For 'Strength Focus': intensity should be 8-10 (but NOT with low recovery), prioritize a concrete gym or strength session.",
+            "For 'Build Strength and Endurance': intensity should be 6-8, combine a clear stimulus with a realistic alternative.",
+            "CRITICAL: In the reasoning, use the exact goal name \"" + profile.goal + "\". No synonyms.",
+            "CRITICAL: Always include an alternative as its own key (alternative).",
         ],
     }
     return (
         f"{COACH_SYSTEM_PROMPT}\n"
         f"{json.dumps(user_payload, ensure_ascii=False, separators=(',', ':'), default=str)}\n"
-        "Antwort nur als JSON ohne Markdown."
+        "Return JSON only, no Markdown."
     )
 
 
 def format_coach_message(recommendation: dict[str, Any]) -> str:
-    title = str(recommendation.get("titel", "Empfehlung"))
-    recommendation_text = str(recommendation.get("empfehlung", "Keine Empfehlung verfuegbar."))
-    intensity = recommendation.get("intensitaet", "n/a")
-    reasoning = str(recommendation.get("begruendung", ""))
+    normalized = _normalize_recommendation_keys(recommendation)
+    title = str(normalized.get("title", "Recommendation"))
+    recommendation_text = str(normalized.get("recommendation", "No recommendation available."))
+    alternative = str(normalized.get("alternative", ""))
+    intensity = normalized.get("intensity", "n/a")
+    reasoning = str(normalized.get("reasoning", ""))
     source = str(recommendation.get("source", "model"))
 
     lines = [
         f"**{title}**",
-        f"Intensität: {intensity}/10",
-        f"Empfehlung: {recommendation_text}",
-        f"Begründung: {reasoning}",
-        f"Quelle: {source}",
+        f"Intensity: {intensity}/10",
+        f"Recommendation: {recommendation_text}",
+        f"Alternative: {alternative or '-'}",
+        f"Reasoning: {reasoning}",
+        f"Source: {source}",
     ]
 
     cached_at = recommendation.get("cached_at")
@@ -337,6 +468,7 @@ def _to_intensity(value: Any, default: int = 5) -> int:
 
 def _concrete_next_training(profile: CoachProfile, daily_stats: dict[str, Any], activities: list[dict[str, Any]]) -> dict[str, Any]:
     latest_day = _latest_stat_day(daily_stats)
+    assets = _load_prompt_assets()
     sleep_score = _as_number(latest_day.get("sleep_score"))
     body_battery = _as_number(latest_day.get("body_battery"))
     stress = _as_number(latest_day.get("stress"))
@@ -352,137 +484,75 @@ def _concrete_next_training(profile: CoachProfile, daily_stats: dict[str, Any], 
     # Explicit Ruhetag: if Body Battery is very low, recommend no training today
     ruhetag = body_battery is not None and body_battery < RUHETAG_BODY_BATTERY_THRESHOLD
     if ruhetag:
-        return {
-            "titel": "Ruhetag",
-            "empfehlung": "Heute bitte gar kein Training mehr — ruhe dich aus; versuche es morgen wieder. Wenn du dich bewegen moechtest: 20-30 Min sehr lockeres Gehen oder Mobility. Alternative: 15-20 Min Atem- und Mobilitaetsroutine.",
-            "intensitaet": 1,
-            "begruendung": f"Deine Body Battery ist sehr niedrig ({body_battery if body_battery is not None else 'n/a'}). Deshalb empfehle ich heute keinen Trainingsreiz und priorisiere Ruhe und Regeneration.",
-        }
+        return _render_fallback("ruhetag", latest_day, assets)
 
     if "marathon" in goal:
         if recovery_low:
-            return {
-                "titel": "Marathon-Recovery",
-                "empfehlung": "Heute: 30-40 Min lockerer Dauerlauf in Zone 2 oder 45 Min zuegiges Gehen, danach 10 Min Mobility. Alternative: 45 Min Bein- und Coretraining im Gym mit moderater Last.",
-                "intensitaet": 3,
-                "begruendung": f"Fuer dein Marathon-Ziel ist Erholung heute sinnvoller als ein harter Reiz, weil Sleep {sleep_score if sleep_score is not None else 'n/a'} und Body Battery {body_battery if body_battery is not None else 'n/a'} Erholung priorisieren.",
-            }
+            return _render_fallback("marathon_recovery", latest_day, assets)
 
         if sleep_score is not None and sleep_score >= 75 and body_battery is not None and body_battery >= 75 and (stress is None or stress <= 20):
-            return {
-                "titel": "Marathon-Longrun",
-                "empfehlung": "Heute: 14-16 km lockerer Longrun in Zone 2. Halte das Tempo so, dass du noch sprechen kannst, und laufe die letzten 10 Minuten bewusst sauber und ruhig. Alternative: 50 Min Beintraining im Gym plus 15 Min lockeres Auslaufen.",
-                "intensitaet": 6,
-                "begruendung": f"Deine Daten sind aktuell stark (Sleep {sleep_score:.0f}, Body Battery {body_battery:.0f}, Stress {stress if stress is not None else 'n/a'}). Fuer Marathon-Aufbau ist ein langer aerober Reiz jetzt sehr passend.",
-            }
+            return _render_fallback("marathon_longrun", latest_day, assets)
 
-        return {
-            "titel": "Marathon-Aufbau",
-            "empfehlung": "Heute: 10 Min einlaufen, dann 6-8 km zuegiger Dauerlauf im stabilen Tempo, anschliessend 4x20 Sekunden lockere Steigerungen und 10 Min auslaufen. Alternative: 45 Min lockeres Radfahren plus 10 Min Core.",
-            "intensitaet": 5,
-            "begruendung": f"Deine Erholung ist gut genug fuer einen klaren Laufreiz, aber noch nicht maximal. Mit Sleep {sleep_score if sleep_score is not None else 'n/a'} und Body Battery {body_battery if body_battery is not None else 'n/a'} passt ein kontrollierter Aufbau besser als ein Wochenplan.",
-        }
+        return _render_fallback("marathon_build", latest_day, assets)
 
-    if "ausdauer" in goal:
+    if "endurance" in goal or "ausdauer" in goal:
         if recovery_low:
-            return {
-                "titel": "Ausdauer-Erholung",
-                "empfehlung": "Heute: 30-40 Min lockerer Dauerlauf in Zone 2 oder 45 Min lockeres Radfahren. Alternative: 25 Min zuegiges Gehen plus 10 Min Mobility.",
-                "intensitaet": 3,
-                "begruendung": f"Das Ausdauerziel bleibt wichtig, aber deine Erholung spricht fuer einen lockeren Reiz (Sleep {sleep_score if sleep_score is not None else 'n/a'}, Body Battery {body_battery if body_battery is not None else 'n/a'}).",
-            }
-        return {
-            "titel": "Ausdauer-Session",
-            "empfehlung": "Heute: 12 Min einlaufen, dann 20-25 Min Tempodauerlauf knapp unter Wettkampftempo, danach 10 Min auslaufen. Alternative: 60 Min ruhiger Dauerlauf in Zone 2.",
-            "intensitaet": 6,
-            "begruendung": f"Deine Werte sind stabil genug fuer einen klaren Ausdauerreiz. Das passt direkt zum Ziel 'Ausdauer Fokus' und nutzt die gute Erholung (Stress {stress if stress is not None else 'n/a'}).",
-        }
+            return _render_fallback("ausdauer_recovery", latest_day, assets)
+        return _render_fallback("ausdauer_session", latest_day, assets)
 
-    if "kraft" in goal and "ausdauer" not in goal:
+    if ("strength" in goal or "kraft" in goal) and "ausdauer" not in goal and "endurance" not in goal:
         if recovery_low:
-            return {
-                "titel": "Kraft-Erholung",
-                "empfehlung": "Heute: 40 Min Technik-Krafttraining mit moderaten Gewichten, 3 Saetze pro Uebung, keine Maximalversuche. Alternative: 30 Min lockeres Radfahren plus Core.",
-                "intensitaet": 4,
-                "begruendung": f"Fuer das Kraftziel ist ein sauberer, nicht maximaler Reiz sinnvoll, solange Sleep {sleep_score if sleep_score is not None else 'n/a'} und Body Battery {body_battery if body_battery is not None else 'n/a'} nicht noch besser sind.",
-            }
-        return {
-            "titel": "Kraft-Session",
-            "empfehlung": "Heute: 50 Min Gym mit Kniebeuge, Druecken, Ziehen und Core. 3-4 Uebungen, 3 Saetze je 8-10 Wiederholungen, kontrollierte Technik. Alternative: 35 Min lockerer Lauf plus 10 Min Mobility.",
-            "intensitaet": 9,
-            "begruendung": f"Das Kraftziel spricht fuer eine klare Gym-Session. Deine aktuelle Erholung ist gut genug fuer einen strukturierten Reiz (VO2Max {latest_day.get('vo2_max', 'n/a')}, RHR {latest_day.get('resting_heart_rate', 'n/a')}).",
-        }
+            return _render_fallback("kraft_recovery", latest_day, assets)
+        return _render_fallback("kraft_session", latest_day, assets)
 
-    if "kraft und ausdauer" in goal:
+    if "strength and endurance" in goal or "build strength and endurance" in goal or "kraft und ausdauer" in goal:
         if recovery_low:
-            return {
-                "titel": "Balance-Erholung",
-                "empfehlung": "Heute: 35 Min lockerer Lauf plus 15 Min Core/Stabi. Alternative: 45 Min Beine/Ganzkoerper im Gym mit moderater Last.",
-                "intensitaet": 3,
-                "begruendung": f"Dein kombiniertes Ziel bleibt sinnvoll, aber mit Sleep {sleep_score if sleep_score is not None else 'n/a'} und Body Battery {body_battery if body_battery is not None else 'n/a'} ist heute ein lockerer Reiz besser.",
-            }
-        return {
-            "titel": "Balance-Session",
-            "empfehlung": "Heute: 10 Min einlaufen, dann 4x5 Min zuegig laufen mit 2 Min locker, danach 10 Min auslaufen. Alternative: 45 Min Gym Ganzkoerper mit 3 Uebungen plus 10 Min lockerer Lauf.",
-            "intensitaet": 6,
-            "begruendung": f"Fuer Kraft und Ausdauer maximieren ist heute ein kombinierter, konkreter Reiz passend. Du hast gute Voraussetzungen durch Sleep {sleep_score if sleep_score is not None else 'n/a'} und Body Battery {body_battery if body_battery is not None else 'n/a'}.",
-        }
+            return _render_fallback("balance_recovery", latest_day, assets)
+        return _render_fallback("balance_session", latest_day, assets)
 
     if recovery_low:
-        return {
-            "titel": "Regenerationseinheit",
-            "empfehlung": "Hauptteil: 25-35 Min sehr locker (Spaziergang, lockeres Rad oder easy Jog) + 10 Min Mobility/Huefte/Ruecken. Alternative: 20 Min lockeres Ergometer + 10 Min Dehnen.",
-            "intensitaet": 2,
-            "begruendung": f"Deine Erholung ist reduziert (Sleep {sleep_score if sleep_score is not None else 'n/a'}, Body Battery {body_battery if body_battery is not None else 'n/a'}). Heute bringt ein lockerer Reiz mehr als hohe Last.",
-        }
+        return _render_fallback("general_recovery", latest_day, assets)
 
     if "strength" in latest_activity_type:
-        return {
-            "titel": "Ausdauer mit Technikfokus",
-            "empfehlung": "Heute: 40-50 Min lockerer Dauerlauf oder lockere Radrunde in Zone 2 mit gleichmaessigem Tempo. Alternative: 30 Min zuegiges Gehen plus 15 Min Core/Stabi.",
-            "intensitaet": 5,
-            "begruendung": f"Nach der letzten Krafteinheit ist ein aerober Reiz sinnvoll, um Erholung zu foerdern und trotzdem Trainingsreiz zu setzen. Dein Stress liegt bei {stress if stress is not None else 'n/a'}.",
-        }
+        return _render_fallback("post_strength_endurance", latest_day, assets)
 
     if "run" in latest_activity_type or "cycling" in latest_activity_type or "drau" in preference:
-        return {
-            "titel": "Strukturierte Ausdauereinheit",
-            "empfehlung": "Heute: 10 Min einlaufen, dann 4x4 Min zuegig (RPE 7/10) mit 3 Min locker dazwischen, danach 10 Min auslaufen. Alternative: 45 Min lockerer Dauerlauf in Zone 2.",
-            "intensitaet": 7,
-            "begruendung": f"Deine aktuellen Werte erlauben einen klaren Belastungsreiz; der Wechsel aus Tempo und Erholung setzt einen konkreten Stimulus (Stress {stress if stress is not None else 'n/a'}).",
-        }
+        return _render_fallback("structured_endurance", latest_day, assets)
 
-    return {
-        "titel": "Ganzkoerper-Session",
-        "empfehlung": "Heute: 35-45 Min Ganzkoerper (Kniebeuge/Druecken/Ziehen/Core), 3 Saetze je Uebung mit sauberer Technik und moderater Last. Alternative: 40 Min lockere Ausdauereinheit plus 10 Min Mobility.",
-        "intensitaet": 6,
-        "begruendung": "Die Daten zeigen keine harte Restriktion. Eine strukturierte, konkrete Einheit ist sinnvoller als eine allgemeine Wochenvorgabe.",
-    }
+    return _render_fallback("general_strength", latest_day, assets)
 
 
 def _needs_enrichment(recommendation: dict[str, Any]) -> bool:
-    rec_text = str(recommendation.get("empfehlung", "")).strip().lower()
-    reason = str(recommendation.get("begruendung", "")).strip().lower()
+    normalized = _normalize_recommendation_keys(recommendation)
+    rec_text = str(normalized.get("recommendation", "")).strip().lower()
+    alternative = str(normalized.get("alternative", "")).strip().lower()
+    reason = str(normalized.get("reasoning", "")).strip().lower()
 
     if not rec_text or len(rec_text) < 45:
         return True
     generic_markers = [
-        "pro woche",
+        "per week",
         "2-3",
         "3-4",
+        "twice",
+        "3 times",
+        "routine",
+        "plan",
+        "weekly",
+        "week",
+        "pro woche",
         "zweimal",
         "2 mal",
         "3 mal",
-        "routine",
         "trainingsplan",
         "wochenplan",
         "woche",
     ]
     if any(marker in rec_text for marker in generic_markers):
         return True
-    if "alternative:" not in rec_text:
+    if not alternative and "alternative:" not in rec_text:
         return True
-    if not any(marker in rec_text for marker in ["heute:", "jetzt:", "morgen:"]):
+    if not any(marker in rec_text for marker in ["today", "now", "tomorrow", "heute", "jetzt", "morgen"]):
         return True
     if reason in {"", "n/a", "na", "none"}:
         return True
@@ -500,22 +570,44 @@ def _fix_goal_references(text: str, correct_goal: str) -> str:
     text_lower = text.lower()
     
     # Map common wrong references to the correct goal
-    if "kraft fokus" in goal_lower:
-        # Replace wrong alternatives for "Kraft Fokus"
-        wrong_terms = ["kraftausdauer", "kraft und ausdauer", "ausdauerziel", "ausdauer fokus"]
+    if "strength focus" in goal_lower or "kraft fokus" in goal_lower:
+        # Replace wrong alternatives for strength focus
+        wrong_terms = [
+            "strength and endurance",
+            "build strength and endurance",
+            "endurance focus",
+            "kraftausdauer",
+            "kraft und ausdauer",
+            "ausdauerziel",
+            "ausdauer fokus",
+        ]
         for term in wrong_terms:
             if term in text_lower:
                 # Case-insensitive replacement
                 text = re.sub(re.escape(term), correct_goal, text, flags=re.IGNORECASE)
-    elif "ausdauer fokus" in goal_lower:
-        # Replace wrong alternatives for "Ausdauer Fokus"
-        wrong_terms = ["kraft fokus", "kraft und ausdauer", "kraftziel", "kraft-ziel"]
+    elif "endurance focus" in goal_lower or "ausdauer fokus" in goal_lower:
+        # Replace wrong alternatives for endurance focus
+        wrong_terms = [
+            "strength focus",
+            "strength and endurance",
+            "build strength and endurance",
+            "kraft fokus",
+            "kraft und ausdauer",
+            "kraftziel",
+            "kraft-ziel",
+        ]
         for term in wrong_terms:
             if term in text_lower:
                 text = re.sub(re.escape(term), correct_goal, text, flags=re.IGNORECASE)
-    elif "kraft und ausdauer" in goal_lower:
+    elif "strength and endurance" in goal_lower or "build strength and endurance" in goal_lower or "kraft und ausdauer" in goal_lower:
         # Replace wrong alternatives for combined goal
-        wrong_terms = ["kraft fokus", "ausdauer fokus", "kraftausdauer"]
+        wrong_terms = [
+            "strength focus",
+            "endurance focus",
+            "kraft fokus",
+            "ausdauer fokus",
+            "kraftausdauer",
+        ]
         for term in wrong_terms:
             if term in text_lower:
                 text = re.sub(re.escape(term), correct_goal, text, flags=re.IGNORECASE)
@@ -530,7 +622,7 @@ def _enrich_recommendation(
     activities: list[dict[str, Any]],
 ) -> dict[str, Any]:
     base = _concrete_next_training(profile, daily_stats, activities)
-    result = dict(recommendation)
+    result = _normalize_recommendation_keys(recommendation)
 
     if _needs_enrichment(result):
         return base
@@ -553,24 +645,28 @@ def _enrich_recommendation(
     if recovery_low:
         return base
 
-    result.setdefault("titel", base["titel"])
+    result.setdefault("title", base["title"])
     
     # Adjust intensity based on goal if needed
-    current_intensity = _to_intensity(result.get("intensitaet"), 5)
+    current_intensity = _to_intensity(result.get("intensity"), 5)
     goal_baseline = _calculate_goal_intensity_baseline(profile.goal)
     if current_intensity < goal_baseline - 1:
-        result["intensitaet"] = goal_baseline
+        result["intensity"] = goal_baseline
     else:
-        result["intensitaet"] = current_intensity
+        result["intensity"] = current_intensity
     
-    if not str(result.get("begruendung", "")).strip() or str(result.get("begruendung", "")).strip().lower() in {"n/a", "na"}:
-        result["begruendung"] = base["begruendung"]
+    if not str(result.get("reasoning", "")).strip() or str(result.get("reasoning", "")).strip().lower() in {"n/a", "na"}:
+        result["reasoning"] = base["reasoning"]
     else:
         # Fix goal references in begruendung
-        result["begruendung"] = _fix_goal_references(result["begruendung"], profile.goal)
+        result["reasoning"] = _fix_goal_references(result["reasoning"], profile.goal)
     
-    if "alternative:" not in str(result.get("empfehlung", "")).lower():
-        result["empfehlung"] = f"{str(result.get('empfehlung', '')).strip()} Alternative: {base['empfehlung'].split('Alternative:', 1)[-1].strip()}"
+    if not str(result.get("alternative", "")).strip():
+        result["alternative"] = base.get("alternative", "")
+    if not str(result.get("alternative", "")).strip():
+        fallback_alt = str(base.get("recommendation", "")).split("Alternative:", 1)
+        if len(fallback_alt) > 1:
+            result["alternative"] = fallback_alt[1].strip()
     
     return result
 
@@ -621,7 +717,9 @@ def generate_coach_recommendation(
         try:
             response = client.generate_content(prompt)
             response_text = getattr(response, "text", "") or ""
+            _log_llm_raw_response(response_text)
             recommendation = _extract_json_response(response_text)
+            recommendation = _normalize_recommendation_keys(recommendation)
             recommendation = _enrich_recommendation(recommendation, profile, daily_stats, activities)
             recommendation["source"] = "model"
             recommendation["model_attempt"] = attempt

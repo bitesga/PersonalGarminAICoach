@@ -171,9 +171,9 @@ def render_auth_gate() -> str:
 
     if not st.session_state.get("discord_verified"):
         st.markdown("### Anmeldung / Verifikation")
-        st.caption("Wähle eine Anmeldemethode: Discord oder Email.")
+        st.caption("Wähle eine Anmeldemethode: Email oder Discord.")
 
-        method = st.radio("Anmeldemethode wählen", options=["Discord", "Email"], index=0, horizontal=True)
+        method = st.radio("Anmeldemethode wählen", options=["Email", "Discord"], index=0, horizontal=True)
 
         st.session_state.setdefault("temp_email", "")
         st.session_state.setdefault("temp_code_input", "")
