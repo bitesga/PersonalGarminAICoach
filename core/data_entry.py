@@ -21,36 +21,36 @@ def render_garmin_credentials_section() -> dict[str, str] | None:
 
     st.markdown("### Garmin Connect")
     st.write(
-        "Melde dich mit deinem Garmin-Account an, um automatisch Aktivitäten und Fitnessdaten zu synchronisieren."
+        "Sign in with your Garmin account to sync activities and fitness data automatically."
     )
 
     col1, col2 = st.columns(2)
     with col1:
         email = st.text_input(
-            "Garmin E-Mail",
-            placeholder="dein.name@example.com",
+            "Garmin email",
+            placeholder="your.name@example.com",
             key="garmin_email",
-            help="E-Mail-Adresse deines Garmin-Accounts",
+            help="Email address for your Garmin account",
         )
 
     with col2:
         password = st.text_input(
-            "Garmin Passwort",
+            "Garmin password",
             type="password",
             placeholder="••••••••",
             key="garmin_password",
-            help="Passwort deines Garmin-Accounts",
+            help="Password for your Garmin account",
         )
 
-    if st.button("✓ Garmin-Account verbinden", key="connect_garmin_btn", use_container_width=True):
+    if st.button("✓ Connect Garmin account", key="connect_garmin_btn", use_container_width=True):
         if email and password:
-            st.success("Garmin-Account erfolgreich vorbereitet.")
+            st.success("Garmin account prepared successfully.")
             return {"email": email.strip(), "password": password}
-        st.error("Bitte gib E-Mail und Passwort ein.")
+        st.error("Please enter both email and password.")
         return None
 
     st.markdown(
-        "<span style='color:#94a3b8; font-size:0.85rem'>Hinweis: Die Anmeldedaten werden lokal für den aktiven Discord-User gespeichert.</span>",
+        "<span style='color:#94a3b8; font-size:0.85rem'>Note: The login data is stored locally for the active Discord user.</span>",
         unsafe_allow_html=True,
     )
     return None
@@ -61,7 +61,7 @@ def render_manual_health_entry() -> dict[str, Any]:
     if st is None:
         return {}
 
-    st.markdown("### Manuelle Gesundheitsdaten eingeben")
+    st.markdown("### Enter manual health data")
 
     training_balance_options = [
         "N/A",
@@ -94,19 +94,19 @@ def render_manual_health_entry() -> dict[str, Any]:
             key="manual_training_load_acute",
         )
         training_balance_feedback = st.selectbox(
-            "Training Balance",
+            "Training balance",
             training_balance_options,
             index=0,
             key="manual_training_balance_feedback",
         )
         if training_balance_feedback == "OTHER":
             training_balance_feedback = st.text_input(
-                "Training Balance (frei eingeben)",
+                "Training balance (custom)",
                 placeholder="z. B. AEROBIC_HIGH_SHORTAGE",
                 key="manual_training_balance_feedback_other",
             ).strip() or "N/A"
-        date_input = st.date_input("Datum", value=datetime.now(), key="manual_date")
-        time_input = st.time_input("Uhrzeit", value=datetime.now().time(), key="manual_time")
+        date_input = st.date_input("Date", value=datetime.now(), key="manual_date")
+        time_input = st.time_input("Time", value=datetime.now().time(), key="manual_time")
     
     return {
         "date": str(date_input),
@@ -126,22 +126,22 @@ def render_manual_activity_entry() -> dict[str, Any] | None:
     if st is None:
         return None
 
-    st.markdown("### Manuelle Aktivität hinzufügen")
+    st.markdown("### Add manual activity")
     
     col1, col2 = st.columns(2)
     with col1:
         activity_type = st.selectbox(
-            "Aktivitätstyp",
+            "Activity type",
             ["running", "cycling", "strength_training", "swimming", "walking", "other"],
             key="manual_activity_type"
         )
-        duration_minutes = st.number_input("Dauer (Minuten)", 1, 300, 45, step=5, key="manual_duration")
-        distance_km = st.number_input("Distanz (km, 0 wenn nicht bekannt)", 0.0, 100.0, 0.0, step=0.1, key="manual_distance")
+        duration_minutes = st.number_input("Duration (minutes)", 1, 300, 45, step=5, key="manual_duration")
+        distance_km = st.number_input("Distance (km, 0 if unknown)", 0.0, 100.0, 0.0, step=0.1, key="manual_distance")
     
     with col2:
-        calories = st.number_input("Kalorien", 0, 2000, 300, step=10, key="manual_calories")
-        date_input = st.date_input("Datum der Aktivität", value=datetime.now(), key="manual_activity_date")
-        time_input = st.time_input("Uhrzeit", value=datetime.now().time(), key="manual_activity_time")
+        calories = st.number_input("Calories", 0, 2000, 300, step=10, key="manual_calories")
+        date_input = st.date_input("Activity date", value=datetime.now(), key="manual_activity_date")
+        time_input = st.time_input("Time", value=datetime.now().time(), key="manual_activity_time")
 
         # For strength training allow selecting the performed exercises instead of a numeric training effect
         if activity_type.lower().startswith("strength"):
@@ -200,11 +200,11 @@ def render_manual_activity_entry() -> dict[str, Any] | None:
                 "SLED_PUSH",
                 "SLED_PULL",
             ]
-            selected_exercises = st.multiselect("Übungen (Strength)", exercises, key="manual_strength_exercises")
+            selected_exercises = st.multiselect("Exercises (strength)", exercises, key="manual_strength_exercises")
         else:
-            training_effect = st.slider("Trainingseffekt (Garmin-Skala 1–5)", 1.0, 5.0, 3.0, step=0.1, key="manual_training_effect")
+            training_effect = st.slider("Training effect (Garmin scale 1-5)", 1.0, 5.0, 3.0, step=0.1, key="manual_training_effect")
     
-    if st.button("Aktivität speichern", key="save_manual_activity_btn"):
+    if st.button("Save activity", key="save_manual_activity_btn"):
         # Combine date and time into single datetime string
         dt = datetime.combine(date_input, time_input)
         primary_metric = None

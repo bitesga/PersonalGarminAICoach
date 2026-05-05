@@ -26,7 +26,7 @@ PROMPT_ASSETS_PATH = DATA_DIR / "coach_examples.json"
 LLM_RAW_LOG_PATH = DATA_DIR / "llm_raw_responses.log"
 DEFAULT_GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 CACHE_TTL_HOURS = 6
-# If Body Battery drops under this threshold, recommend an explicit full rest day (Rest Day)
+    # If Body Battery drops under this threshold, recommend an explicit full rest day (Rest Day)
 RUHETAG_BODY_BATTERY_THRESHOLD = 35
 
 @dataclass(frozen=True)
@@ -658,7 +658,7 @@ def _enrich_recommendation(
     if not str(result.get("reasoning", "")).strip() or str(result.get("reasoning", "")).strip().lower() in {"n/a", "na"}:
         result["reasoning"] = base["reasoning"]
     else:
-        # Fix goal references in begruendung
+        # Fix goal references in reasoning
         result["reasoning"] = _fix_goal_references(result["reasoning"], profile.goal)
     
     if not str(result.get("alternative", "")).strip():
@@ -735,7 +735,7 @@ def generate_coach_recommendation(
     recommendation = _local_recommendation(profile, daily_stats, activities)
     recommendation["source"] = "local"
     if last_error is not None:
-        recommendation["fallback_reason"] = f"Provider-Fehler nach 3 Versuchen: {str(last_error)[:220]}"
+        recommendation["fallback_reason"] = f"Provider error after 3 attempts: {str(last_error)[:220]}"
     _save_cached_recommendation(recommendation, user_id=user_id)
     return recommendation
 
@@ -762,7 +762,7 @@ def get_coach_recommendation(
     if client is None:
         recommendation = _local_recommendation(profile, daily_stats, activities)
         recommendation["source"] = "local"
-        recommendation["fallback_reason"] = "GROQ_CLOUD_KEY fehlt oder ist leer."
+        recommendation["fallback_reason"] = "GROQ_CLOUD_KEY is missing or empty."
         _save_cached_recommendation(recommendation)
         return recommendation
 
@@ -775,12 +775,12 @@ def get_coach_recommendation(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build or run the Garmin coach prompt.")
-    parser.add_argument("--mobility", default="Läufer", help="Mobilitätsprofil, z. B. Rollstuhlfahrer oder Läufer")
-    parser.add_argument("--preference", default="Trainiert gerne draußen", help="Trainingspräferenz")
-    parser.add_argument("--goal", default="Maximale Kraft und Ausdauer-Erhalt", help="Trainingsziel")
-    parser.add_argument("--run-model", action="store_true", help="Direkt Groq ansprechen")
-    parser.add_argument("--model", default=DEFAULT_GROQ_MODEL_NAME, help="Groq-Modellname")
-    parser.add_argument("--refresh", action="store_true", help="Cache ignorieren und neue Empfehlung anfordern")
+    parser.add_argument("--mobility", default="Runner", help="Mobility profile, e.g. wheelchair user or runner")
+    parser.add_argument("--preference", default="Prefers to train outdoors", help="Training preference")
+    parser.add_argument("--goal", default="Maintain maximum strength and endurance", help="Training goal")
+    parser.add_argument("--run-model", action="store_true", help="Call Groq directly")
+    parser.add_argument("--model", default=DEFAULT_GROQ_MODEL_NAME, help="Groq model name")
+    parser.add_argument("--refresh", action="store_true", help="Ignore the cache and request a new recommendation")
     return parser.parse_args()
 
 

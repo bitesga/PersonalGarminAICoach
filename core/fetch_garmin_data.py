@@ -289,8 +289,8 @@ def main() -> int:
     if not email or not password:
         print(
             (
-                "Fehlende Zugangsdaten. Bitte hinterlege Garmin E-Mail und Passwort in der App "
-                "oder setze GARMIN_EMAIL und GARMIN_PASSWORD in der .env."
+                "Missing credentials. Please add Garmin email and password in the app "
+                "or set GARMIN_EMAIL and GARMIN_PASSWORD in the .env file."
             ),
             file=sys.stderr,
         )
@@ -300,16 +300,16 @@ def main() -> int:
         client = Garmin(email=email, password=password)
         client.login()
     except GarminConnectAuthenticationError:
-        print("Login fehlgeschlagen: Bitte E-Mail/Passwort pruefen.", file=sys.stderr)
+        print("Login failed: please check your email/password.", file=sys.stderr)
         return 1
     except GarminConnectConnectionError:
-        print("Verbindungsfehler beim Garmin-Login. Bitte spaeter erneut versuchen.", file=sys.stderr)
+        print("Connection error during Garmin login. Please try again later.", file=sys.stderr)
         return 1
     except GarminConnectTooManyRequestsError:
-        print("Zu viele Anfragen an Garmin. Bitte kurz warten und erneut versuchen.", file=sys.stderr)
+        print("Too many requests to Garmin. Please wait briefly and try again.", file=sys.stderr)
         return 1
     except Exception as exc:
-        print(f"Unerwarteter Fehler beim Login: {exc}", file=sys.stderr)
+        print(f"Unexpected login error: {exc}", file=sys.stderr)
         return 1
 
     today = date.today()
@@ -319,7 +319,7 @@ def main() -> int:
     try:
         user_profile = _call_with_backoff(client.get_user_profile)
     except Exception as e:
-        print(f"Warnung: Konnte Profil nicht abrufen: {e}", file=sys.stderr)
+        print(f"Warning: could not fetch profile: {e}", file=sys.stderr)
         user_profile = {}
 
     # ===== Fetch training load metrics =====
@@ -328,7 +328,7 @@ def main() -> int:
         training_load = _extract_training_load(training_status)
         training_balance_feedback = _extract_training_balance_feedback(training_status)
     except Exception as e:
-        print(f"Warnung: Konnte Trainingsbelastung nicht abrufen: {e}", file=sys.stderr)
+        print(f"Warning: could not fetch training load: {e}", file=sys.stderr)
         training_load = "N/A"
         training_balance_feedback = "N/A"
 
@@ -409,42 +409,42 @@ def main() -> int:
             }
             
             if day_offset == 0:
-                print(f"--- Garmin Tageszusammenfassung ({target_date}) ---")
-                print(f"Aktivitaetstyp: {activity_type}")
+                print(f"--- Garmin daily summary ({target_date}) ---")
+                print(f"Activity type: {activity_type}")
                 
                 # Label for activity_type based metric
                 activity_type_key = str(activity_type).lower()
                 if "strength" in activity_type_key or "weight" in activity_type_key:
-                    print(f"Übungen: {training_effect}")
+                    print(f"Exercises: {training_effect}")
                 else:
                     print(f"Training Effect: {training_effect}")
                 
                 print(f"Body Battery: {body_battery}")
                 print(f"Sleep Score: {sleep_score}")
-                print(f"Stress (Durchschnitt): {stress}")
+                print(f"Stress (average): {stress}")
                 print(f"VO2 Max: {vo2max}")
-                print(f"Ruhepuls: {rhr}")
-                print(f"Trainingsbelastung: {training_load}")
-                print(f"Trainingsbelastung (akut): {training_load}")
+                print(f"Resting HR: {rhr}")
+                print(f"Training load: {training_load}")
+                print(f"Training load (acute): {training_load}")
                 print(f"Training Balance: {training_balance_feedback}")
                 print()
         except Exception as exc:
-            print(f"Fehler beim Abrufen der Stats für {target_date}: {exc}", file=sys.stderr)
+            print(f"Error fetching stats for {target_date}: {exc}", file=sys.stderr)
             pass
 
 
     # ===== Save to JSON =====
     try:
         stats_file = save_daily_stats(daily_stats_data, user_id=user_id or None)
-        print(f"Daily Stats gespeichert in: {stats_file}")
+        print(f"Daily stats saved to: {stats_file}")
     except Exception as exc:
-        print(f"Fehler beim Speichern der Daily Stats: {exc}", file=sys.stderr)
+        print(f"Error saving daily stats: {exc}", file=sys.stderr)
 
     try:
         activities_file = save_activities(activities_to_save, user_id=user_id or None)
-        print(f"Aktivitaeten gespeichert in: {activities_file}")
+        print(f"Activities saved to: {activities_file}")
     except Exception as exc:
-        print(f"Fehler beim Speichern der Aktivitaeten: {exc}", file=sys.stderr)
+        print(f"Error saving activities: {exc}", file=sys.stderr)
 
     return 0
 

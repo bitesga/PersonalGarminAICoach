@@ -170,36 +170,36 @@ def render_auth_gate() -> str:
         st.rerun()
 
     if not st.session_state.get("discord_verified"):
-        st.markdown("### Anmeldung / Verifikation")
-        st.caption("Wähle eine Anmeldemethode: Email oder Discord.")
+        st.markdown("### Sign In / Verification")
+        st.caption("Choose a sign-in method: email or Discord.")
 
-        method = st.radio("Anmeldemethode wählen", options=["Email", "Discord"], index=0, horizontal=True)
+        method = st.radio("Choose sign-in method", options=["Email", "Discord"], index=0, horizontal=True)
 
         st.session_state.setdefault("temp_email", "")
         st.session_state.setdefault("temp_code_input", "")
         st.session_state.setdefault("temp_code_sent", False)
 
         if method == "Discord":
-            st.caption("Discord-Anmeldung mit klarer Trennung zwischen Login und Registrierung.")
-            st.info("Bitte zuerst dem Discord-Server beitreten: https://discord.gg/DPMpqmEaN7")
+            st.caption("Discord sign-in with a clear separation between login and registration.")
+            st.info("Please join the Discord server first: https://discord.gg/DPMpqmEaN7")
 
-            tab_login, tab_register = st.tabs(["Ich habe schon ein Konto", "Neues Konto registrieren"])
+            tab_login, tab_register = st.tabs(["I already have an account", "Register a new account"])
 
             with tab_login:
-                discord_id = st.text_input("Discord User-ID (numerisch)", value=st.session_state.get("temp_discord_id", ""), key="reg_discord_id_field")
-                discord_password = st.text_input("Passwort", type="password", key="reg_discord_password_field")
+                discord_id = st.text_input("Discord user ID (numeric)", value=st.session_state.get("temp_discord_id", ""), key="reg_discord_id_field")
+                discord_password = st.text_input("Password", type="password", key="reg_discord_password_field")
                 st.session_state["temp_discord_id"] = discord_id
 
-                if st.button("Mit Discord und Passwort anmelden", key="discord_login_btn"):
+                if st.button("Sign in with Discord and password", key="discord_login_btn"):
                     if not discord_id:
-                        st.error("Bitte deine Discord User-ID eingeben.")
+                        st.error("Please enter your Discord user ID.")
                     elif not discord_password:
-                        st.error("Bitte dein Passwort eingeben.")
+                        st.error("Please enter your password.")
                     else:
                         resolved_key, resolved_user = user_management.get_user_login_record_for_discord_id(str(discord_id).strip())
                         verifier = _resolve_verify_discord_password()
                         if not verifier(str(discord_id).strip(), discord_password):
-                            st.error("Discord-Login fehlgeschlagen. User-ID oder Passwort ist falsch.")
+                            st.error("Discord sign-in failed. The user ID or password is incorrect.")
                         else:
                             login_key = resolved_key or str(discord_id).strip()
                             profile = load_user_profile(user_id=login_key) or {}
@@ -214,49 +214,49 @@ def render_auth_gate() -> str:
                             st.session_state.discord_verified = True
                             st.session_state.active_discord_id = login_key
                             _persist_auth_session(login_key)
-                            st.success("Login erfolgreich — du wirst jetzt zum Dashboard weitergeleitet.")
+                            st.success("Sign-in successful - you are being redirected to the dashboard.")
                             st.rerun()
 
             with tab_register:
-                discord_id_reg = st.text_input("Discord User-ID für Registrierung", value=st.session_state.get("temp_discord_id", ""), key="reg_discord_id_register_field")
-                discord_password_reg = st.text_input("Passwort für neues Discord-Login", type="password", key="reg_discord_password_register_field")
+                discord_id_reg = st.text_input("Discord user ID for registration", value=st.session_state.get("temp_discord_id", ""), key="reg_discord_id_register_field")
+                discord_password_reg = st.text_input("Password for new Discord sign-in", type="password", key="reg_discord_password_register_field")
                 st.session_state["temp_discord_id"] = discord_id_reg
 
-                if st.button("Registrieren & Code senden", key="reg_send_code_btn"):
+                if st.button("Register & send code", key="reg_send_code_btn"):
                     if not discord_id_reg:
-                        st.error("Bitte eine Discord User-ID angeben.")
+                        st.error("Please enter a Discord user ID.")
                     else:
                         discord_id_clean = str(discord_id_reg).strip()
                         existing_discord_user = user_management.get_user(discord_id_clean)
                         if existing_discord_user and bool(existing_discord_user.get("verified", False)):
-                            st.warning("Diese Discord-ID ist bereits registriert und verifiziert. Bitte den Login-Tab verwenden.")
+                            st.warning("This Discord ID is already registered and verified. Please use the sign-in tab.")
                         else:
                             user = user_management.register_user(discord_id_clean, password=discord_password_reg or None)
                             code = user.get("verification_code")
                             if not code:
-                                st.error("Kein Verifizierungscode verfügbar. Bitte versuche es erneut oder kontaktiere den Support.")
+                                st.error("No verification code available. Please try again or contact support.")
                             else:
                                 invite = os.getenv("DISCORD_SERVER_INVITE", "https://discord.gg/DPMpqmEaN7")
                                 sent, msg = send_verification_dm(discord_id_clean, str(code), invite_link=invite)
                                 if sent:
-                                    st.success("Verifizierungs-Code per DM gesendet. Bitte prüfe Discord.")
+                                    st.success("Verification code sent by DM. Please check Discord.")
                                     st.session_state["temp_code_sent"] = True
                                 else:
                                     msg_lower = str(msg).lower()
                                     no_mutual_guild = ("no mutual guilds" in msg_lower) or ("50278" in msg_lower)
                                     if no_mutual_guild:
-                                        st.warning("Bitte zuerst unserem Discord-Server beitreten, damit ich dir eine DM senden kann.")
-                                        st.markdown("Server beitreten: https://discord.gg/DPMpqmEaN7")
+                                        st.warning("Please join our Discord server first so I can send you a DM.")
+                                        st.markdown("Join the server: https://discord.gg/DPMpqmEaN7")
                                     else:
-                                        st.error(f"Fehler beim Senden: {msg}")
+                                        st.error(f"Send failed: {msg}")
 
-                entered = st.text_input("Verifizierungs-Code", value=st.session_state.get("temp_code_input", ""), key="reg_code_input_field")
+                entered = st.text_input("Verification code", value=st.session_state.get("temp_code_input", ""), key="reg_code_input_field")
                 st.session_state["temp_code_input"] = entered
-                if st.button("Code verifizieren", key="reg_verify_btn"):
+                if st.button("Verify code", key="reg_verify_btn"):
                     if not discord_id_reg:
-                        st.error("Gib zuerst deine Discord User-ID ein.")
+                        st.error("Enter your Discord user ID first.")
                     elif not entered:
-                        st.error("Bitte Code eingeben.")
+                        st.error("Please enter the code.")
                     else:
                         ok = user_management.verify_user(str(discord_id_reg).strip(), str(entered).strip())
                         if ok:
@@ -267,32 +267,32 @@ def render_auth_gate() -> str:
                             profile["notify_discord"] = True
                             save_user_profile(profile, user_id=str(discord_id_reg).strip())
                             _persist_auth_session(str(discord_id_reg).strip())
-                            st.success("Verifiziert — du wirst jetzt zum Dashboard weitergeleitet.")
+                            st.success("Verified - you are being redirected to the dashboard.")
                             st.balloons()
                             st.rerun()
                         else:
-                            st.error("Verifikation fehlgeschlagen. Code ungültig oder abgelaufen.")
+                            st.error("Verification failed. The code is invalid or expired.")
 
         elif method == "Email":
-            st.caption("Email-Anmeldung mit klarer Trennung zwischen Login und Registrierung.")
-            tab_login, tab_register = st.tabs(["Ich habe schon ein Konto", "Neues Konto registrieren"])
+            st.caption("Email sign-in with a clear separation between login and registration.")
+            tab_login, tab_register = st.tabs(["I already have an account", "Register a new account"])
 
             with tab_login:
                 email = st.text_input("Email", value=st.session_state.get("temp_email", ""), key="reg_email_field")
-                password = st.text_input("Passwort", type="password", key="reg_password_field")
+                password = st.text_input("Password", type="password", key="reg_password_field")
                 st.session_state["temp_email"] = email
 
-                if st.button("Mit Email und Passwort anmelden", key="email_login_btn"):
+                if st.button("Sign in with email and password", key="email_login_btn"):
                     if not email:
-                        st.error("Bitte deine Email-Adresse angeben.")
+                        st.error("Please enter your email address.")
                     elif not password:
-                        st.error("Bitte dein Passwort eingeben.")
+                        st.error("Please enter your password.")
                     else:
                         user = user_management.get_user_by_email(email.strip().lower())
                         if not user:
-                            st.error("Kein Email-Konto gefunden. Bitte zuerst registrieren.")
+                            st.error("No email account found. Please register first.")
                         elif not user.get("verified"):
-                            st.error("Dein Email-Konto ist noch nicht verifiziert. Bitte zuerst den Code bestätigen.")
+                            st.error("Your email account is not verified yet. Please confirm the code first.")
                         else:
                             verifier = _resolve_verify_email_password()
                             if not verifier(email.strip().lower(), password):
@@ -306,45 +306,45 @@ def render_auth_gate() -> str:
                                 profile["notify_email"] = True
                                 save_user_profile(profile, user_id=key)
                                 _persist_auth_session(key)
-                                st.success("Login erfolgreich — du wirst jetzt zum Dashboard weitergeleitet.")
+                                st.success("Sign-in successful - you are being redirected to the dashboard.")
                                 st.rerun()
 
             with tab_register:
-                email_reg = st.text_input("Email für Registrierung", value=st.session_state.get("temp_email", ""), key="reg_email_register_field")
-                password_reg = st.text_input("Passwort für neues Email-Login", type="password", key="reg_password_register_field")
+                email_reg = st.text_input("Email for registration", value=st.session_state.get("temp_email", ""), key="reg_email_register_field")
+                password_reg = st.text_input("Password for new email sign-in", type="password", key="reg_password_register_field")
                 st.session_state["temp_email"] = email_reg
 
-                if st.button("Registrieren & Code per Email senden", key="reg_email_send_btn"):
+                if st.button("Register & send code by email", key="reg_email_send_btn"):
                     if not email_reg:
-                        st.error("Bitte eine Email-Adresse angeben.")
+                        st.error("Please enter an email address.")
                     else:
                         email_clean = email_reg.strip().lower()
                         existing_email_user = user_management.get_user_by_email(email_clean)
                         if existing_email_user and bool(existing_email_user.get("verified", False)):
-                            st.warning("Diese Email ist bereits registriert und verifiziert. Bitte den Login-Tab verwenden.")
+                            st.warning("This email is already registered and verified. Please use the sign-in tab.")
                         else:
                             user = user_management.register_email_user(email_clean, password=password_reg or None)
                             code = user.get("verification_code")
                             if not code:
-                                st.error("Kein Verifizierungscode verfügbar. Bitte versuche es erneut.")
+                                st.error("No verification code available. Please try again.")
                             else:
-                                subject = "Dein Verifizierungs-Code für PersonalGarminAICoach"
-                                text = f"Dein Verifizierungs-Code: {code}\n\nGib diesen Code im App-Formular ein, um dein Konto zu verifizieren."
-                                html = f"<p>Dein Verifizierungs-Code: <strong>{code}</strong></p>"
+                                subject = "Your verification code for PersonalGarminAICoach"
+                                text = f"Your verification code: {code}\n\nEnter this code in the app form to verify your account."
+                                html = f"<p>Your verification code: <strong>{code}</strong></p>"
                                 sent, msg = send_email(subject=subject, body_text=text, body_html=html, recipient_email=email_clean)
                                 if sent:
-                                    st.success("Verifizierungs-Code per Email gesendet. Bitte prüfe deinen Posteingang.")
+                                    st.success("Verification code sent by email. Please check your inbox.")
                                     st.session_state["temp_code_sent"] = True
                                 else:
-                                    st.error(f"Fehler beim Senden der Email: {msg}")
+                                    st.error(f"Email send failed: {msg}")
 
-                entered = st.text_input("Verifizierungs-Code", value=st.session_state.get("temp_code_input", ""), key="reg_email_code_input_field")
+                entered = st.text_input("Verification code", value=st.session_state.get("temp_code_input", ""), key="reg_email_code_input_field")
                 st.session_state["temp_code_input"] = entered
-                if st.button("Code verifizieren (Email)", key="reg_email_verify_btn"):
+                if st.button("Verify code (email)", key="reg_email_verify_btn"):
                     if not email_reg:
-                        st.error("Gib zuerst deine Email-Adresse ein.")
+                        st.error("Enter your email address first.")
                     elif not entered:
-                        st.error("Bitte Code eingeben.")
+                        st.error("Please enter the code.")
                     else:
                         ok = user_management.verify_email_user(email_reg.strip().lower(), str(entered).strip())
                         if ok:
@@ -356,11 +356,11 @@ def render_auth_gate() -> str:
                             profile["notify_email"] = True
                             save_user_profile(profile, user_id=key)
                             _persist_auth_session(key)
-                            st.success("Email verifiziert — du wirst jetzt zum Dashboard weitergeleitet.")
+                            st.success("Email verified - you are being redirected to the dashboard.")
                             st.balloons()
                             st.rerun()
                         else:
-                            st.error("Verifikation fehlgeschlagen. Code ungültig oder abgelaufen.")
+                            st.error("Verification failed. The code is invalid or expired.")
 
         st.stop()
 

@@ -95,7 +95,7 @@ def send_discord_dm(message: str, user_id: str) -> tuple[bool, str]:
     if not token:
         return False, "DISCORD_BOT_TOKEN fehlt."
     if not user_id:
-        return False, "Discord User-ID fehlt."
+        return False, "Discord user ID is missing."
 
     try:
         channel_resp = _discord_api_post(
@@ -105,22 +105,22 @@ def send_discord_dm(message: str, user_id: str) -> tuple[bool, str]:
         )
         channel_id = str(channel_resp.get("id", "")).strip()
         if not channel_id:
-            return False, "Discord DM-Channel konnte nicht erstellt werden."
+            return False, "Discord DM channel could not be created."
 
         _discord_api_post(
             f"https://discord.com/api/v10/channels/{channel_id}/messages",
             {"content": message[:1900]},
             token,
         )
-        return True, "Discord-DM gesendet."
+        return True, "Discord DM sent."
     except urllib.error.HTTPError as exc:
         try:
             error_payload = exc.read().decode("utf-8", errors="ignore")
         except Exception:
             error_payload = ""
-        return False, f"Discord API Fehler {exc.code}: {error_payload or exc.reason}"
+        return False, f"Discord API error {exc.code}: {error_payload or exc.reason}"
     except Exception as exc:
-        return False, f"Discord-Versand fehlgeschlagen: {exc}"
+        return False, f"Discord send failed: {exc}"
 
 
 def _clip(value: Any, max_len: int) -> str:
@@ -195,9 +195,9 @@ def send_discord_dm_embed(
     """
     token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
     if not token:
-        return False, "DISCORD_BOT_TOKEN fehlt."
+        return False, "DISCORD_BOT_TOKEN is missing."
     if not user_id:
-        return False, "Discord User-ID fehlt."
+        return False, "Discord user ID is missing."
 
     try:
         channel_resp = _discord_api_post(
@@ -207,7 +207,7 @@ def send_discord_dm_embed(
         )
         channel_id = str(channel_resp.get("id", "")).strip()
         if not channel_id:
-            return False, "Discord DM-Channel konnte nicht erstellt werden."
+            return False, "Discord DM channel could not be created."
 
         payload: dict[str, Any] = {
             "embeds": [embed],
@@ -220,15 +220,15 @@ def send_discord_dm_embed(
             payload,
             token,
         )
-        return True, "Discord-Embed gesendet."
+        return True, "Discord embed sent."
     except urllib.error.HTTPError as exc:
         try:
             error_payload = exc.read().decode("utf-8", errors="ignore")
         except Exception:
             error_payload = ""
-        return False, f"Discord API Fehler {exc.code}: {error_payload or exc.reason}"
+        return False, f"Discord API error {exc.code}: {error_payload or exc.reason}"
     except Exception as exc:
-        return False, f"Discord-Versand fehlgeschlagen: {exc}"
+        return False, f"Discord send failed: {exc}"
 
 
 def send_discord_recommendation(recommendation: dict[str, Any], user_id: str, fallback_text: str) -> tuple[bool, str]:
@@ -241,23 +241,23 @@ def send_discord_recommendation(recommendation: dict[str, Any], user_id: str, fa
     # Fallback to plain DM (some guild DM settings or payload issues can reject embeds)
     ok2, msg2 = send_discord_dm(fallback_text, user_id)
     if ok2:
-        return True, f"Embed fehlgeschlagen ({msg}) — Fallback als Text gesendet."
-    return False, f"Embed fehlgeschlagen ({msg}) und Text-Fallback ebenfalls fehlgeschlagen ({msg2})."
+        return True, f"Embed failed ({msg}) - fallback text sent."
+    return False, f"Embed failed ({msg}) and text fallback also failed ({msg2})."
 
 
 def send_verification_dm(user_id: str, code: str, invite_link: str | None = None) -> tuple[bool, str]:
     """Send a short verification DM containing the code and optional server invite instructions."""
     if not user_id:
-        return False, "Discord User-ID fehlt."
+        return False, "Discord user ID is missing."
     try:
         message = (
-            f"Dein Verifizierungs-Code: {code}\n\n"
-            "Gib diesen Code in der App ein, um deinen Account zu verifizieren."
-            "Hinweis: Der Bot sendet dir nur diesen Code und eine kurze Anleitung."
+            f"Your verification code: {code}\n\n"
+            "Enter this code in the app to verify your account."
+            "Note: The bot only sends this code and a short instruction."
         )
         return send_discord_dm(message, user_id)
     except Exception as exc:
-        return False, f"Fehler beim Senden des Verifizierungs-Codes: {exc}"
+        return False, f"Error sending verification code: {exc}"
 
 
 def _build_message_html(recommendation: dict[str, Any]) -> str:
@@ -359,7 +359,7 @@ def send_email(
     password = os.getenv("MAIL_PASSWORD", "").strip()
     
     if not username or not password:
-        return False, "MAIL_USERNAME oder MAIL_PASSWORD nicht in .env gesetzt."
+        return False, "MAIL_USERNAME or MAIL_PASSWORD is not set in .env."
     
     if not recipient_email:
         recipient_email = username
@@ -402,13 +402,13 @@ def send_email(
         smtp.sendmail(username, recipient_email, msg.as_string())
         smtp.quit()
         
-        return True, f"Email an {recipient_email} gesendet."
+        return True, f"Email sent to {recipient_email}."
     except smtplib.SMTPAuthenticationError:
-        return False, "SMTP-Authentifizierung fehlgeschlagen. Prüfe MAIL_USERNAME und MAIL_PASSWORD."
+        return False, "SMTP authentication failed. Check MAIL_USERNAME and MAIL_PASSWORD."
     except smtplib.SMTPException as exc:
-        return False, f"SMTP-Fehler: {exc}"
+        return False, f"SMTP error: {exc}"
     except Exception as exc:
-        return False, f"Email-Versand fehlgeschlagen: {exc}"
+        return False, f"Email send failed: {exc}"
 
 
 
@@ -421,7 +421,7 @@ def notify_recommendation(
     result = {"sent": [], "errors": [], "skipped": []}
 
     if str(recommendation.get("source", "")).lower() != "model":
-        result["skipped"].append("Keine neue Modell-Empfehlung; kein Versand.")
+        result["skipped"].append("No new model recommendation; nothing sent.")
         return result
 
     enriched_recommendation = dict(recommendation)
@@ -444,14 +444,14 @@ def notify_recommendation(
             success, msg = send_discord_recommendation(enriched_recommendation, discord_user_id, fallback_text=body_text)
             (result["sent"] if success else result["errors"]).append(msg)
         else:
-            result["errors"].append("Discord-Benachrichtigung aktiviert, aber keine Discord-ID gespeichert.")
+            result["errors"].append("Discord notifications are enabled, but no Discord ID is saved.")
     else:
-        result["skipped"].append("Discord-Benachrichtigung deaktiviert.")
+        result["skipped"].append("Discord notifications are disabled.")
 
     # Send Email notification
     if email_enabled and email_address:
         success, msg = send_email(
-            subject="PersonalGarminAICoach - Tägliche Trainingsempfehlung",
+            subject="PersonalGarminAICoach - Daily training recommendation",
             body_text=body_text,
             body_html=body_html,
             recipient_email=email_address,
@@ -459,8 +459,8 @@ def notify_recommendation(
         )
         (result["sent"] if success else result["errors"]).append(msg)
     elif email_enabled and not email_address:
-        result["errors"].append("Email-Benachrichtigung aktiviert, aber keine Email-Adresse gespeichert.")
+        result["errors"].append("Email notifications are enabled, but no email address is saved.")
     else:
-        result["skipped"].append("Email-Benachrichtigung deaktiviert.")
+        result["skipped"].append("Email notifications are disabled.")
 
     return result

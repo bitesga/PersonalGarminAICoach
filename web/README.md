@@ -1,6 +1,6 @@
 # Streamlit Dashboard
 
-Dieses Verzeichnis enthält das Dashboard für den Personal Garmin AI Coach.
+This directory contains the dashboard for Personal Garmin AI Coach.
 
 ## Start
 
@@ -8,20 +8,20 @@ Dieses Verzeichnis enthält das Dashboard für den Personal Garmin AI Coach.
 streamlit run web/app.py
 ```
 
-## Funktionen
-- Anzeige der letzten Fitnessdaten aus `data/daily_stats.json`
-- Anzeige der letzten Aktivitäten aus `data/activities.json`
-- Einstellbare Präferenzen für Mobilität, Ziel und Trainingsstil
-- Anzeige der aktuellen Coach-Empfehlung mit 6-Stunden-Cache
-- Kopierbare Nachricht für Discord, Push oder spätere Integrationen
-- Button zum Neuladen der Garmin-Fitnessdaten direkt aus dem Dashboard
-- Optionaler Versand neuer Modell-Empfehlungen per Discord-DM
+## Features
+- Displays the latest fitness data from `data/daily_stats.json`
+- Displays the latest activities from `data/activities.json`
+- Configurable preferences for mobility, goal, and training style
+- Shows the current coach recommendation with a 6-hour cache
+- Copyable message for Discord, push, or later integrations
+- Button to refresh Garmin fitness data directly from the dashboard
+- Optional delivery of new model recommendations via Discord DM
 
-## Hinweise
-- Die aktuelle Empfehlung wird über `core/coach_agent.py` bezogen und spart durch den Cache Token.
-- Versand wird nur bei neuer Modell-Empfehlung ausgelöst (`source=model`), nicht bei Cache-Treffern.
+## Notes
+- The current recommendation is fetched through `core/coach_agent.py` and the cache helps save tokens.
+- Notifications are only sent for new model recommendations (`source=model`), not for cache hits.
 
 ## Notification Setup
-- Discord-DM:
-	- `DISCORD_BOT_TOKEN` in `.env` setzen
-	- Im Dashboard `Discord User-ID` des Empfängers eintragen
+- Discord DM:
+  - Set `DISCORD_BOT_TOKEN` in `.env`
+  - Enter the recipient's `Discord user ID` in the dashboard
