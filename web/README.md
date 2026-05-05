@@ -1,27 +1,75 @@
 # Streamlit Dashboard
 
-This directory contains the dashboard for Personal Garmin AI Coach.
+This folder contains the Streamlit dashboard for Personal Garmin AI Coach. It handles authentication, profile settings, data review, and triggers for Garmin refresh + recommendations.
 
-## Start
+## Entry Point
 
 ```bash
 streamlit run web/app.py
 ```
 
-## Features
-- Displays the latest fitness data from `data/daily_stats.json`
-- Displays the latest activities from `data/activities.json`
-- Configurable preferences for mobility, goal, and training style
-- Shows the current coach recommendation with a 6-hour cache
-- Copyable message for Discord, push, or later integrations
-- Button to refresh Garmin fitness data directly from the dashboard
-- Optional delivery of new model recommendations via Discord DM
+## Key Screens
 
-## Notes
-- The current recommendation is fetched through `core/coach_agent.py` and the cache helps save tokens.
-- Notifications are only sent for new model recommendations (`source=model`), not for cache hits.
+- Authentication gate
+  - Discord or email registration
+  - 6-digit verification codes
+  - Auth token persistence for returning users
 
-## Notification Setup
-- Discord DM:
-  - Set `DISCORD_BOT_TOKEN` in `.env`
-  - Enter the recipient's `Discord user ID` in the dashboard
+- Dashboard tab
+  - Summary metrics (Sleep, Body Battery, Stress, VO2Max, RHR, Acute Load)
+  - Current recommendation (title, intensity, alternative, reasoning)
+  - Recent activities table
+
+- Data Sources tab
+  - Garmin credential capture
+  - Manual health entry
+  - Manual activity entry
+  - Deletion of manual entries
+
+- Sidebar configuration
+  - Mobility and goal selection
+  - Coach refresh actions
+  - Automatic recommendation times
+  - Notification settings
+
+## Automatic Recommendations
+
+The sidebar lets each user enable two daily times. The scheduler runs inside the Streamlit process and performs:
+
+1. Garmin refresh
+2. Recommendation generation
+3. Notification delivery
+
+Times are interpreted in server local time. The process must remain running for scheduled jobs to trigger.
+
+## Configuration
+
+The dashboard reads all configuration from `.env` in the repo root. Key values:
+
+- `GROQ_CLOUD_KEY`
+- `GARMIN_EMAIL` / `GARMIN_PASSWORD`
+- `DISCORD_BOT_TOKEN`
+- `MAIL_USERNAME` / `MAIL_PASSWORD`
+
+## Data Files
+
+Per-user data lives under `data/users/<user_id>/`:
+
+- `user_profile.json` - dashboard settings and auto times
+- `daily_stats.json` - latest health metrics
+- `activities.json` - recent activities
+- `coach_recommendation.json` - cached recommendation
+
+## Developer Notes
+
+- UI logic is in [web/app.py](web/app.py)
+- Auth flow is in [web/auth.py](web/auth.py)
+- Sidebar config is in [web/sidebar.py](web/sidebar.py)
+- Coach logic is in [core/coach_agent.py](../core/coach_agent.py)
+- Scheduler is in [core/auto_recommendation.py](../core/auto_recommendation.py)
+
+## Troubleshooting
+
+- If notifications do not send, confirm the relevant env vars are set
+- If recommendations are always local, verify `GROQ_CLOUD_KEY`
+- If Garmin refresh fails, validate credentials and check rate limits

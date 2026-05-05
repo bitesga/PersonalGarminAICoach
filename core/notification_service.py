@@ -19,11 +19,11 @@ from dotenv import load_dotenv
 
 
 def _build_message(recommendation: dict[str, Any]) -> str:
-    title = str(recommendation.get("title") or recommendation.get("titel") or "Coach Recommendation")
-    intensity = recommendation.get("intensity", recommendation.get("intensitaet", "n/a"))
-    recommendation_text = str(recommendation.get("recommendation") or recommendation.get("empfehlung") or "")
+    title = str(recommendation.get("title") or "Coach Recommendation")
+    intensity = recommendation.get("intensity", "n/a")
+    recommendation_text = str(recommendation.get("recommendation") or "")
     alternative_text = str(recommendation.get("alternative") or "").strip()
-    reasoning = str(recommendation.get("reasoning") or recommendation.get("begruendung") or "")
+    reasoning = str(recommendation.get("reasoning") or "")
     latest_day = recommendation.get("latest_day", {}) if isinstance(recommendation.get("latest_day", {}), dict) else {}
     sleep_score = latest_day.get("sleep_score", "n/a")
     body_battery = latest_day.get("body_battery", "n/a")
@@ -93,7 +93,7 @@ def _discord_api_post(url: str, payload: dict[str, Any], token: str) -> dict[str
 def send_discord_dm(message: str, user_id: str) -> tuple[bool, str]:
     token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
     if not token:
-        return False, "DISCORD_BOT_TOKEN fehlt."
+        return False, "DISCORD_BOT_TOKEN is missing."
     if not user_id:
         return False, "Discord user ID is missing."
 
@@ -141,11 +141,11 @@ def _split_recommendation_text(recommendation_text: str) -> tuple[str, str]:
 
 
 def _build_discord_recommendation_embed(recommendation: dict[str, Any]) -> dict[str, Any]:
-    title = _clip(recommendation.get("title") or recommendation.get("titel") or "Coach Recommendation", 256)
-    intensity = _clip(recommendation.get("intensity") or recommendation.get("intensitaet") or "n/a", 32)
-    recommendation_text = str(recommendation.get("recommendation") or recommendation.get("empfehlung") or "")
+    title = _clip(recommendation.get("title") or "Coach Recommendation", 256)
+    intensity = _clip(recommendation.get("intensity") or "n/a", 32)
+    recommendation_text = str(recommendation.get("recommendation") or "")
     alternative_text = str(recommendation.get("alternative") or "")
-    reasoning = _clip(recommendation.get("reasoning") or recommendation.get("begruendung") or "", 1024)
+    reasoning = _clip(recommendation.get("reasoning") or "", 1024)
 
     latest_day = recommendation.get("latest_day", {}) if isinstance(recommendation.get("latest_day", {}), dict) else {}
     sleep_score = _clip(latest_day.get("sleep_score", "n/a"), 24)
@@ -262,11 +262,11 @@ def send_verification_dm(user_id: str, code: str, invite_link: str | None = None
 
 def _build_message_html(recommendation: dict[str, Any]) -> str:
     """Build an HTML-formatted recommendation message."""
-    title = str(recommendation.get("title") or recommendation.get("titel") or "Coach Recommendation")
-    intensity = recommendation.get("intensity", recommendation.get("intensitaet", "n/a"))
-    recommendation_text = str(recommendation.get("recommendation") or recommendation.get("empfehlung") or "")
+    title = str(recommendation.get("title") or "Coach Recommendation")
+    intensity = recommendation.get("intensity", "n/a")
+    recommendation_text = str(recommendation.get("recommendation") or "")
     alternative_text = str(recommendation.get("alternative") or "").strip()
-    reasoning = str(recommendation.get("reasoning") or recommendation.get("begruendung") or "")
+    reasoning = str(recommendation.get("reasoning") or "")
     latest_day = recommendation.get("latest_day", {}) if isinstance(recommendation.get("latest_day", {}), dict) else {}
     sleep_score = latest_day.get("sleep_score", "n/a")
     body_battery = latest_day.get("body_battery", "n/a")
@@ -321,12 +321,12 @@ def _build_message_html(recommendation: dict[str, Any]) -> str:
         </div>
 
         <div style="background-color: #f5f3ff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #a78bfa;">
-            <h2 style="color: #7c3aed; margin-top: 0;">📋 Main Recommendation: {title}</h2>
+            <h2 style="color: #7c3aed; margin-top: 0;">Main Recommendation: {title}</h2>
             <p>{main_recommendation}</p>
         </div>
 
         <div style="background-color: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #fbbf24;">
-            <h3 style="color: #d97706; margin-top: 0;">🔄 Alternative:</h3>
+            <h3 style="color: #d97706; margin-top: 0;">Alternative:</h3>
             <p>{alternative_recommendation}</p>
         </div>
 

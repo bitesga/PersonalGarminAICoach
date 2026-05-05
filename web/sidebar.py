@@ -5,7 +5,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, time as time_type
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,8 @@ DASHBOARD_DEFAULTS: dict[str, Any] = {
     "discord_user_id": "",
     "notify_email": False,
     "email": "",
+    "auto_recommendation_enabled": False,
+    "auto_recommendation_times": ["09:00", "15:00"],
 }
 
 MOBILITY_OPTIONS = ["Healthy", "Wheelchair", "Minor limitations"]
@@ -40,24 +42,33 @@ def _normalize_choice(value: Any, options: list[str], default_value: str) -> str
         return candidate
     lowered = candidate.lower()
     if options == MOBILITY_OPTIONS:
-        if "rollstuhl" in lowered or "wheelchair" in lowered:
+        if "wheelchair" in lowered:
             return "Wheelchair"
-        if "einschr" in lowered or "behind" in lowered or "limitation" in lowered:
+        if "limitation" in lowered:
             return "Minor limitations"
         return "Healthy"
     if options == GOAL_OPTIONS:
         if (
             "build strength and endurance" in lowered
             or "strength and endurance" in lowered
-            or "kraft und ausdauer" in lowered
-            or ("kraft" in lowered and "ausdauer" in lowered)
         ):
             return "Build Strength and Endurance"
-        if "endurance" in lowered or "ausdauer" in lowered or "marathon" in lowered or "laufen" in lowered:
+        if "endurance" in lowered or "marathon" in lowered:
             return "Endurance Focus"
-        if "strength" in lowered or "kraft" in lowered:
+        if "strength" in lowered:
             return "Strength Focus"
     return default_value
+
+
+def _parse_time_value(value: Any, default_value: str) -> time_type:
+    if isinstance(value, time_type):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.strptime(value.strip(), "%H:%M").time()
+        except ValueError:
+            pass
+    return datetime.strptime(default_value, "%H:%M").time()
 
 
 def _get_last_fetch_timestamp() -> str:
@@ -86,7 +97,7 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
     try:
         result = subprocess.run(command, capture_output=True, text=True, cwd=str(ROOT_DIR), check=False)
     except Exception as exc:
-        return False, f"Reload fehlgeschlagen: {exc}"
+        return False, f"Reload failed: {exc}"
 
     output_parts = []
     if result.stdout.strip():
@@ -143,6 +154,12 @@ def init_state(user_id: str) -> None:
     st.session_state.setdefault("discord_user_id_config", str(profile.get("discord_user_id", DASHBOARD_DEFAULTS["discord_user_id"])).strip())
     st.session_state.setdefault("notify_email_config", bool(profile.get("notify_email", DASHBOARD_DEFAULTS["notify_email"])))
     st.session_state.setdefault("email_config", str(profile.get("email", DASHBOARD_DEFAULTS["email"])).strip())
+    auto_times = profile.get("auto_recommendation_times", DASHBOARD_DEFAULTS["auto_recommendation_times"])
+    time_1 = auto_times[0] if isinstance(auto_times, list) and auto_times else DASHBOARD_DEFAULTS["auto_recommendation_times"][0]
+    time_2 = auto_times[1] if isinstance(auto_times, list) and len(auto_times) > 1 else DASHBOARD_DEFAULTS["auto_recommendation_times"][1]
+    st.session_state.setdefault("auto_reco_enabled_config", bool(profile.get("auto_recommendation_enabled", DASHBOARD_DEFAULTS["auto_recommendation_enabled"])))
+    st.session_state.setdefault("auto_reco_time_1_config", _parse_time_value(time_1, DASHBOARD_DEFAULTS["auto_recommendation_times"][0]))
+    st.session_state.setdefault("auto_reco_time_2_config", _parse_time_value(time_2, DASHBOARD_DEFAULTS["auto_recommendation_times"][1]))
     st.session_state.setdefault("link_email_target_config", "")
     st.session_state.setdefault("link_discord_target_config", "")
     st.session_state.setdefault("link_email_code_config", "")
@@ -178,6 +195,13 @@ def _render_coach_status(container: Any) -> None:
 
 def _save_profile_from_sidebar(user_id: str) -> dict[str, Any]:
     profile = load_user_profile(user_id=user_id) or {}
+    times: list[str] = []
+    for value in [st.session_state.auto_reco_time_1_config, st.session_state.auto_reco_time_2_config]:
+        if isinstance(value, time_type):
+            times.append(value.strftime("%H:%M"))
+        elif isinstance(value, str) and value.strip():
+            times.append(value.strip())
+    times = sorted(set(times)) or list(DASHBOARD_DEFAULTS["auto_recommendation_times"])
     profile.update({
         "mobility": st.session_state.mobility_config.strip(),
         "preference": st.session_state.preference_config.strip(),
@@ -186,6 +210,8 @@ def _save_profile_from_sidebar(user_id: str) -> dict[str, Any]:
         "discord_user_id": st.session_state.discord_user_id_config.strip(),
         "notify_email": bool(st.session_state.notify_email_config),
         "email": st.session_state.email_config.strip(),
+        "auto_recommendation_enabled": bool(st.session_state.auto_reco_enabled_config),
+        "auto_recommendation_times": times,
     })
     save_user_profile(profile, user_id=user_id)
     return profile
@@ -258,6 +284,31 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
             _set_coach_status(["Querying AI..."], "info")
             _log_event("info", f"Manual recommendation refresh requested for user {user_id}.")
             st.rerun()
+
+        st.markdown("---")
+        st.markdown("### Automatic Recommendations")
+        st.toggle(
+            "Enable automatic recommendations",
+            key="auto_reco_enabled_config",
+            help="Fetch Garmin data and send a new recommendation at the selected times.",
+        )
+        auto_enabled = bool(st.session_state.auto_reco_enabled_config)
+        time_col_1, time_col_2 = st.columns(2)
+        with time_col_1:
+            st.time_input(
+                "Time 1",
+                key="auto_reco_time_1_config",
+                disabled=not auto_enabled,
+                help="Use 24-hour format; server local time.",
+            )
+        with time_col_2:
+            st.time_input(
+                "Time 2",
+                key="auto_reco_time_2_config",
+                disabled=not auto_enabled,
+                help="Use 24-hour format; server local time.",
+            )
+        st.caption("Automatic recommendations use the server's local time.")
 
         st.markdown("---")
         st.markdown("### Accounts & Notifications")

@@ -21,6 +21,7 @@ if str(CORE_DIR) not in sys.path:
     sys.path.insert(0, str(CORE_DIR))
 
 from core import coach_agent
+from core import auto_recommendation
 from core.data_persistence import (
     load_activities,
     load_garmin_credentials,
@@ -157,6 +158,8 @@ DASHBOARD_DEFAULTS: dict[str, Any] = {
     "email": "",
     "linked_email": "",
     "linked_discord_id": "",
+    "auto_recommendation_enabled": False,
+    "auto_recommendation_times": ["09:00", "15:00"],
 }
 
 MOBILITY_OPTIONS = ["Healthy", "Wheelchair", "Minor limitations"]
@@ -278,22 +281,20 @@ def _normalize_choice(value: Any, options: list[str], default_value: str) -> str
         return candidate
     lowered = candidate.lower()
     if options == MOBILITY_OPTIONS:
-        if "rollstuhl" in lowered or "wheelchair" in lowered:
+        if "wheelchair" in lowered:
             return "Wheelchair"
-        if "einschr" in lowered or "behind" in lowered or "limitation" in lowered:
+        if "limitation" in lowered:
             return "Minor limitations"
         return "Healthy"
     if options == GOAL_OPTIONS:
         if (
             "build strength and endurance" in lowered
             or "strength and endurance" in lowered
-            or "kraft und ausdauer" in lowered
-            or ("kraft" in lowered and "ausdauer" in lowered)
         ):
             return "Build Strength and Endurance"
-        if "endurance" in lowered or "ausdauer" in lowered or "marathon" in lowered or "laufen" in lowered:
+        if "endurance" in lowered or "marathon" in lowered:
             return "Endurance Focus"
-        if "strength" in lowered or "kraft" in lowered:
+        if "strength" in lowered:
             return "Strength Focus"
     return default_value
 
@@ -878,11 +879,11 @@ def _render_activities(activities: list[dict[str, Any]]) -> None:
 
 def _render_recommendation(recommendation: dict[str, Any]) -> None:
     st.markdown("<h3 class='section-title'>Next Training Recommendation</h3>", unsafe_allow_html=True)
-    title = recommendation.get("title") or recommendation.get("titel") or "Recommendation"
-    recommendation_text = recommendation.get("recommendation") or recommendation.get("empfehlung") or "n/a"
+    title = recommendation.get("title") or "Recommendation"
+    recommendation_text = recommendation.get("recommendation") or "n/a"
     alternative_text = recommendation.get("alternative") or ""
-    intensity = recommendation.get("intensity", recommendation.get("intensitaet", "n/a"))
-    reasoning = recommendation.get("reasoning") or recommendation.get("begruendung") or "n/a"
+    intensity = recommendation.get("intensity", "n/a")
+    reasoning = recommendation.get("reasoning") or "n/a"
     st.markdown(
         f"""
                 <div class='card reco-box'>
@@ -1010,6 +1011,7 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
 
 
 def main() -> None:
+    auto_recommendation.start_scheduler()
     active_user_id = render_auth_gate()
     if not active_user_id:
         return

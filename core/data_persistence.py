@@ -30,6 +30,14 @@ def _resolve_file(filename: str, user_id: str | None = None) -> Path:
     return user_dir / filename
 
 
+def list_user_ids() -> list[str]:
+    """List user ids based on existing user data directories."""
+    data_dir = _ensure_data_dir() / "users"
+    if not data_dir.exists():
+        return []
+    return [item.name for item in data_dir.iterdir() if item.is_dir()]
+
+
 def save_daily_stats(data: dict[str, Any], user_id: str | None = None) -> Path:
     """Save 7-day daily stats to JSON file."""
     filename = _resolve_file("daily_stats.json", user_id=user_id)

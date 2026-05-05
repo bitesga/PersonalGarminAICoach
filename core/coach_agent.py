@@ -26,8 +26,8 @@ PROMPT_ASSETS_PATH = DATA_DIR / "coach_examples.json"
 LLM_RAW_LOG_PATH = DATA_DIR / "llm_raw_responses.log"
 DEFAULT_GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
 CACHE_TTL_HOURS = 6
-    # If Body Battery drops under this threshold, recommend an explicit full rest day (Rest Day)
-RUHETAG_BODY_BATTERY_THRESHOLD = 35
+# If Body Battery drops under this threshold, recommend an explicit full rest day (Rest Day)
+REST_DAY_BODY_BATTERY_THRESHOLD = 35
 
 @dataclass(frozen=True)
 class CoachProfile:
@@ -146,13 +146,7 @@ def _normalize_recommendation_keys(recommendation: dict[str, Any]) -> dict[str, 
     result = dict(recommendation or {})
 
     title = result.get("title")
-    if not title:
-        title = result.get("titel")
-
     recommendation_text = result.get("recommendation")
-    if not recommendation_text:
-        recommendation_text = result.get("empfehlung")
-
     alternative = result.get("alternative")
     if not alternative:
         alt_raw = str(recommendation_text or "")
@@ -162,12 +156,7 @@ def _normalize_recommendation_keys(recommendation: dict[str, Any]) -> dict[str, 
             alternative = alt_reco.strip()
 
     intensity = result.get("intensity")
-    if intensity is None:
-        intensity = result.get("intensitaet")
-
     reasoning = result.get("reasoning")
-    if not reasoning:
-        reasoning = result.get("begruendung")
 
     result.update(
         {
@@ -288,16 +277,14 @@ def _compact_activities(activities: list[dict[str, Any]]) -> list[dict[str, Any]
 def _calculate_goal_intensity_baseline(goal: str) -> int:
     """Calculate base intensity for the selected goal, before health state adjustments."""
     goal_lower = goal.lower()
-    if "strength focus" in goal_lower or "kraft fokus" in goal_lower:
+    if "strength focus" in goal_lower:
         return 9  # Strength focus should be high intensity
     if (
         "build strength and endurance" in goal_lower
         or "strength and endurance" in goal_lower
-        or "kraft und ausdauer" in goal_lower
-        or ("kraft" in goal_lower and "ausdauer" in goal_lower)
     ):
         return 7  # Balanced goal is moderate-high intensity
-    if "endurance focus" in goal_lower or "ausdauer" in goal_lower or "marathon" in goal_lower:
+    if "endurance focus" in goal_lower or "marathon" in goal_lower:
         return 7  # Endurance focus is moderate-high intensity
     return 6  # Default fallback
 
@@ -311,47 +298,47 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
     sleep_score = _as_number(latest_day.get("sleep_score"))
     body_battery = _as_number(latest_day.get("body_battery"))
     recovery_low = (sleep_score is not None and sleep_score < 60) or (body_battery is not None and body_battery < 50)
-    # Very low body battery triggers an explicit "Ruhetag" (no-training today)
-    recovery_ruhetag = body_battery is not None and body_battery < RUHETAG_BODY_BATTERY_THRESHOLD
+    # Very low body battery triggers an explicit rest day (no training today)
+    recovery_rest_day = body_battery is not None and body_battery < REST_DAY_BODY_BATTERY_THRESHOLD
     
     # Extract training load metrics for intensity adjustment
     training_load_acute = _as_number(latest_day.get("training_load_acute"))
     training_balance_feedback = str(latest_day.get("training_balance_feedback", "")).strip()
     
     user_payload = {
-        "nutzerprofil": {
-            "mobilitaet": profile.mobility,
-            "praeferenz": profile.preference,
-            "ziel": profile.goal,
-            "ziel_intensitaets_basis": goal_intensity_baseline,
+        "user_profile": {
+            "mobility": profile.mobility,
+            "preference": profile.preference,
+            "goal": profile.goal,
+            "goal_intensity_baseline": goal_intensity_baseline,
         },
-        "gesundheitsstatus": {
+        "health_status": {
             "sleep_score": sleep_score,
             "body_battery": body_battery,
-            "recovery_kritisch": recovery_low,
-            "recovery_ruhetag": recovery_ruhetag,
-            "warnung": "RECOVERY MODE" if recovery_low else "normal",
+            "recovery_critical": recovery_low,
+            "recovery_rest_day": recovery_rest_day,
+            "warning": "RECOVERY MODE" if recovery_low else "normal",
         },
-        "trainingsbelastung": {
+        "training_load": {
             "acute_training_load": training_load_acute,
             "training_balance_feedback": training_balance_feedback,
         },
-        "historie_7_tage": _compact_daily_stats(daily_stats),
-        "letzte_aktivitaeten": _compact_activities(activities),
-        "ausgabeformat": {
+        "history_7_days": _compact_daily_stats(daily_stats),
+        "recent_activities": _compact_activities(activities),
+        "output_format": {
             "title": "...",
             "recommendation": "...",
             "alternative": "...",
             "intensity": goal_intensity_baseline if not recovery_low else 3,
             "reasoning": "...",
         },
-        "beispiele": assets.get("examples", []),
-        "regeln": [
+        "examples": assets.get("examples", []),
+        "rules": [
             "Describe only the next concrete session or at most the next 1-2 sessions.",
             "No weekly frequency, no plan, no routine.",
             "CRITICAL: If Sleep < 60 or Body Battery < 50, suggest ONLY recovery training, never high intensity. Recommend rest, easy walk, easy yoga; max intensity 3-4.",
-            f"EMERGENCY: recovery_kritisch={recovery_low} - If TRUE, ALWAYS intensity 1-4 regardless of the training goal.",
-            f"EMERGENCY_RUHETAG: recovery_ruhetag={recovery_ruhetag} - If TRUE, return title 'Rest Day' and explicitly say no training today.",
+            f"EMERGENCY: recovery_critical={recovery_low} - If TRUE, ALWAYS intensity 1-4 regardless of the training goal.",
+            f"EMERGENCY_REST_DAY: recovery_rest_day={recovery_rest_day} - If TRUE, return title 'Rest Day' and explicitly say no training today.",
             "ACTIVITIES: distance_km = absolute distance of the last activity; training_effect_score = aerobic/anaerobic stimulus score (1-5). Do NOT mix them up.",
             f"TRAINING LOAD: acute_training_load={training_load_acute} - If high (e.g., > 200), reduce recommended intensity by 2-3 points.",
             f"TRAINING BALANCE: training_balance_feedback='{training_balance_feedback}' - If 'AEROBIC_HIGH_SHORTAGE': recommend high intensity aerobic if aligned with goal. If 'AEROBIC_LOW_SHORTAGE': recommend low intensity aerobic. If 'ANAEROBIC': recommend strength/anaerobic stimulus.",
@@ -393,7 +380,7 @@ def format_coach_message(recommendation: dict[str, Any]) -> str:
     cached_at = recommendation.get("cached_at")
     cache_age_hours = recommendation.get("cache_age_hours")
     if cached_at and cache_age_hours is not None:
-        lines.append(f"Cache: zuletzt aktualisiert um {cached_at} ({cache_age_hours}h alt)")
+        lines.append(f"Cache: last updated at {cached_at} ({cache_age_hours}h old)")
 
     return "\n".join(lines)
 
@@ -481,10 +468,10 @@ def _concrete_next_training(profile: CoachProfile, daily_stats: dict[str, Any], 
         or (body_battery is not None and body_battery < 50)  # Changed from 40 to 50 for better recovery awareness
     )
 
-    # Explicit Ruhetag: if Body Battery is very low, recommend no training today
-    ruhetag = body_battery is not None and body_battery < RUHETAG_BODY_BATTERY_THRESHOLD
-    if ruhetag:
-        return _render_fallback("ruhetag", latest_day, assets)
+    # Explicit rest day: if Body Battery is very low, recommend no training today
+    rest_day = body_battery is not None and body_battery < REST_DAY_BODY_BATTERY_THRESHOLD
+    if rest_day:
+        return _render_fallback("rest_day", latest_day, assets)
 
     if "marathon" in goal:
         if recovery_low:
@@ -495,17 +482,17 @@ def _concrete_next_training(profile: CoachProfile, daily_stats: dict[str, Any], 
 
         return _render_fallback("marathon_build", latest_day, assets)
 
-    if "endurance" in goal or "ausdauer" in goal:
+    if "endurance" in goal:
         if recovery_low:
-            return _render_fallback("ausdauer_recovery", latest_day, assets)
-        return _render_fallback("ausdauer_session", latest_day, assets)
+            return _render_fallback("endurance_recovery", latest_day, assets)
+        return _render_fallback("endurance_session", latest_day, assets)
 
-    if ("strength" in goal or "kraft" in goal) and "ausdauer" not in goal and "endurance" not in goal:
+    if "strength" in goal and "endurance" not in goal:
         if recovery_low:
-            return _render_fallback("kraft_recovery", latest_day, assets)
-        return _render_fallback("kraft_session", latest_day, assets)
+            return _render_fallback("strength_recovery", latest_day, assets)
+        return _render_fallback("strength_session", latest_day, assets)
 
-    if "strength and endurance" in goal or "build strength and endurance" in goal or "kraft und ausdauer" in goal:
+    if "strength and endurance" in goal or "build strength and endurance" in goal:
         if recovery_low:
             return _render_fallback("balance_recovery", latest_day, assets)
         return _render_fallback("balance_session", latest_day, assets)
@@ -516,7 +503,7 @@ def _concrete_next_training(profile: CoachProfile, daily_stats: dict[str, Any], 
     if "strength" in latest_activity_type:
         return _render_fallback("post_strength_endurance", latest_day, assets)
 
-    if "run" in latest_activity_type or "cycling" in latest_activity_type or "drau" in preference:
+    if "run" in latest_activity_type or "cycling" in latest_activity_type or "outdoor" in preference:
         return _render_fallback("structured_endurance", latest_day, assets)
 
     return _render_fallback("general_strength", latest_day, assets)
@@ -540,23 +527,16 @@ def _needs_enrichment(recommendation: dict[str, Any]) -> bool:
         "plan",
         "weekly",
         "week",
-        "pro woche",
-        "zweimal",
-        "2 mal",
-        "3 mal",
-        "trainingsplan",
-        "wochenplan",
-        "woche",
     ]
     if any(marker in rec_text for marker in generic_markers):
         return True
     if not alternative and "alternative:" not in rec_text:
         return True
-    if not any(marker in rec_text for marker in ["today", "now", "tomorrow", "heute", "jetzt", "morgen"]):
+    if not any(marker in rec_text for marker in ["today", "now", "tomorrow"]):
         return True
     if reason in {"", "n/a", "na", "none"}:
         return True
-    if not any(metric in reason for metric in ["sleep", "body battery", "stress", "vo2", "rhr", "ruhepuls", "aktivität", "aktivitaet"]):
+    if not any(metric in reason for metric in ["sleep", "body battery", "stress", "vo2", "rhr", "activity"]):
         return True
     return False
 
@@ -570,43 +550,32 @@ def _fix_goal_references(text: str, correct_goal: str) -> str:
     text_lower = text.lower()
     
     # Map common wrong references to the correct goal
-    if "strength focus" in goal_lower or "kraft fokus" in goal_lower:
+    if "strength focus" in goal_lower:
         # Replace wrong alternatives for strength focus
         wrong_terms = [
             "strength and endurance",
             "build strength and endurance",
             "endurance focus",
-            "kraftausdauer",
-            "kraft und ausdauer",
-            "ausdauerziel",
-            "ausdauer fokus",
         ]
         for term in wrong_terms:
             if term in text_lower:
                 # Case-insensitive replacement
                 text = re.sub(re.escape(term), correct_goal, text, flags=re.IGNORECASE)
-    elif "endurance focus" in goal_lower or "ausdauer fokus" in goal_lower:
+    elif "endurance focus" in goal_lower:
         # Replace wrong alternatives for endurance focus
         wrong_terms = [
             "strength focus",
             "strength and endurance",
             "build strength and endurance",
-            "kraft fokus",
-            "kraft und ausdauer",
-            "kraftziel",
-            "kraft-ziel",
         ]
         for term in wrong_terms:
             if term in text_lower:
                 text = re.sub(re.escape(term), correct_goal, text, flags=re.IGNORECASE)
-    elif "strength and endurance" in goal_lower or "build strength and endurance" in goal_lower or "kraft und ausdauer" in goal_lower:
+    elif "strength and endurance" in goal_lower or "build strength and endurance" in goal_lower:
         # Replace wrong alternatives for combined goal
         wrong_terms = [
             "strength focus",
             "endurance focus",
-            "kraft fokus",
-            "ausdauer fokus",
-            "kraftausdauer",
         ]
         for term in wrong_terms:
             if term in text_lower:
@@ -636,9 +605,9 @@ def _enrich_recommendation(
         (sleep_score is not None and sleep_score < 60)
         or (body_battery is not None and body_battery < 50)  # Lowered threshold from 40 to 50
     )
-    # If Body Battery is critically low, prefer explicit Ruhetag fallback
-    ruhetag = body_battery is not None and body_battery < RUHETAG_BODY_BATTERY_THRESHOLD
-    if ruhetag:
+    # If Body Battery is critically low, prefer explicit rest day fallback
+    rest_day = body_battery is not None and body_battery < REST_DAY_BODY_BATTERY_THRESHOLD
+    if rest_day:
         return base
     
     # If recovery is low, always use the safe fallback recommendation

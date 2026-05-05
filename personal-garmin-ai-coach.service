@@ -1,0 +1,15 @@
+[Unit]
+Description=Personal Garmin AI Coach
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/ubuntu/PersonalGarminAICoach
+EnvironmentFile=/home/ubuntu/PersonalGarminAICoach/.env
+ExecStart=/usr/bin/python3 -m streamlit run /home/ubuntu/PersonalGarminAICoach/web/app.py --server.port=8080 --server.address=0.0.0.0
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target
