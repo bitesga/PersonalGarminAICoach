@@ -60,9 +60,11 @@ def _build_message(recommendation: dict[str, Any], language: str = "en") -> str:
         main_recommendation = recommendation_text.strip()
         alternative_recommendation = _tr(language, "No alternative provided.", "Keine Alternative angegeben.")
 
+    todays_metrics_label = _tr(language, "TODAY'S METRICS", "HEUTIGE WERTE")
+
     body = (
         f"{_tr(language, 'GOOD MORNING!', 'GUTEN MORGEN!')}\n\n"
-        f"{_tr(language, "TODAY'S METRICS", 'HEUTIGE WERTE')}:\n"
+        f"{todays_metrics_label}:\n"
         f"{_tr(language, 'SLEEP SCORE', 'SCHLAF-SCORE')}: {sleep_score}/100\n"
         f"{_tr(language, 'BODY BATTERY', 'KOERPERBATTERIE')}: {body_battery}/100\n"
         f"{_tr(language, 'STRESS', 'STRESS')}: {stress}\n"
