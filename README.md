@@ -69,7 +69,7 @@ MAIL_USERNAME=your_smtp_username
 MAIL_PASSWORD=your_smtp_password
 
 # Optional Vault OSS (secrets)
-VAULT_ADDR=http://127.0.0.1:8089
+VAULT_ADDR=http://127.0.0.1:8200
 VAULT_TOKEN=your_vault_token
 VAULT_KV_PATH=kv/garmin/default
 ```
@@ -118,7 +118,7 @@ VAULT_KV_PATH=kv/garmin/default
   - Email notifications (HTML)
 
 - Data Sources
-  - Garmin credentials
+  - Garmin credentials (saved locally and, if Vault is configured, also written to Vault on connect)
   - Manual health metrics input
   - Manual activity input
   - Manual weather testing values for recommendation checks
@@ -265,6 +265,7 @@ Global fallbacks (if per-user persistence fails):
 ## Vault OSS Setup (Optional)
 
 If you run Vault OSS on your Ubuntu server, the app can read Garmin credentials directly from Vault and skip local JSON storage.
+When a user clicks **Connect Garmin Account** in the dashboard, the app now writes the credentials to both local JSON and Vault if `VAULT_ADDR` and `VAULT_TOKEN` are configured.
 
 - The dashboard shows a one-time toast when Vault is enabled via env vars.
 - Vault access is controlled by `VAULT_ADDR`, `VAULT_TOKEN`, and `VAULT_KV_PATH`.
@@ -276,11 +277,13 @@ If you run Vault OSS on your Ubuntu server, the app can read Garmin credentials 
 3. Enable KV v2 at the `kv` mount (or use your own mount name).
 4. Store Garmin credentials:
   ```bash
-  vault kv put kv/garmin/default email=your_email@example.com password=your_password
+  export VAULT_ADDR=http://127.0.0.1:8200
+  export VAULT_TOKEN=your_vault_token
+  vault kv put -mount=kv garmin/default email='your_email@example.com' password='your_password'
   ```
 5. Set these env vars in `.env` (or your systemd service):
   ```env
-  VAULT_ADDR=http://127.0.0.1:8089
+  VAULT_ADDR=http://127.0.0.1:8200
   VAULT_TOKEN=your_vault_token
   VAULT_KV_PATH=kv/garmin/default
   ```
@@ -303,6 +306,7 @@ Per-user option:
 - `no handler for route`: the KV v2 mount path is incorrect or KV is not enabled.
 - `key not found`: the record does not exist at the provided `VAULT_KV_PATH`.
 - `connection refused`: Vault is not reachable at `VAULT_ADDR`.
+- To inspect the app logs on systemd, use `journalctl -u PGAIC.service -f`.
 
 ## Operational Notes
 
@@ -310,6 +314,7 @@ Per-user option:
 - If `GROQ_CLOUD_KEY` is missing, the coach uses deterministic fallbacks.
 - Email requires SMTP credentials; otherwise it is skipped.
 - The auto scheduler requires the Streamlit process to remain running.
+- The Streamlit service now logs to stderr, so `journalctl -u PGAIC.service -f` shows app logs and Vault credential save/load messages.
 
 ## License
 

@@ -21,7 +21,7 @@ streamlit run web/app.py
   - Recent activities table
 
 - Data Sources tab
-  - Garmin credential capture
+  - Garmin credential capture (writes to local JSON and Vault when configured)
   - Manual health entry
   - Manual activity entry
   - Deletion of manual entries
@@ -50,6 +50,7 @@ The dashboard reads all configuration from `.env` in the repo root. Key values:
 - `GARMIN_EMAIL` / `GARMIN_PASSWORD`
 - `DISCORD_BOT_TOKEN`
 - `MAIL_USERNAME` / `MAIL_PASSWORD`
+- `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_KV_PATH` for optional Vault credential storage
 
 ## Data Files
 
@@ -73,3 +74,4 @@ Per-user data lives under `data/users/<user_id>/`:
 - If notifications do not send, confirm the relevant env vars are set
 - If recommendations are always local, verify `GROQ_CLOUD_KEY`
 - If Garmin refresh fails, validate credentials and check rate limits
+- If the Streamlit service is running under systemd, check `journalctl -u PGAIC.service -f` for app logs
