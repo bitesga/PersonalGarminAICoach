@@ -306,7 +306,10 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                 if auth_error:
                     message = message.removeprefix("[AUTH_ERROR]\n")
                     st.error(tr("Garmin login failed. Please check your email and password.", "Garmin-Login fehlgeschlagen. Bitte E-Mail und Passwort pruefen."))
-                    _set_coach_status([tr("Garmin login failed.", "Garmin-Login fehlgeschlagen."), message], "error")
+                    _set_coach_status([
+                        tr("Garmin login failed.", "Garmin-Login fehlgeschlagen."),
+                        tr("Please check your email and password.", "Bitte E-Mail und Passwort pruefen."),
+                    ], "error")
                     _log_event("error", f"Garmin auth failed for user {user_id}: {message}")
                 elif rate_limit_error:
                     message = message.removeprefix("[RATE_LIMIT]\n")
@@ -322,7 +325,7 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                     st.error(tr("Garmin data could not be refreshed.", "Garmin-Daten konnten nicht aktualisiert werden."))
                     _set_coach_status([tr("Garmin refresh failed.", "Garmin-Aktualisierung fehlgeschlagen."), message], "error")
                     _log_event("error", f"Garmin refresh failed for user {user_id}: {message}")
-            with st.expander(tr("Reload output", "Ausgabe aktualisieren"), expanded=not success):
+            with st.expander(tr("Reload output", "Ausgabe aktualisieren"), expanded=False):
                 st.code(message, language="text")
             st.rerun()
 

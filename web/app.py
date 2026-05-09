@@ -554,7 +554,7 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                 if auth_error:
                     message = message.removeprefix("[AUTH_ERROR]\n")
                     st.error("Garmin login failed. Please check your email and password.")
-                    _set_coach_status(["Garmin login failed.", message], "error")
+                    _set_coach_status(["Garmin login failed.", "Please check your email and password."], "error")
                 elif rate_limit_error:
                     message = message.removeprefix("[RATE_LIMIT]\n")
                     st.warning("Garmin is rate limiting the server. Using cached data if available.")
@@ -566,7 +566,7 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                 else:
                     st.error("Garmin data could not be refreshed.")
                     _set_coach_status(["Garmin refresh failed.", message], "error")
-            with st.expander("Reload output", expanded=not success):
+            with st.expander("Reload output", expanded=False):
                 st.code(message, language="text")
             st.session_state.refresh_recommendation = True
             st.session_state.trigger_notification_on_refresh = True
