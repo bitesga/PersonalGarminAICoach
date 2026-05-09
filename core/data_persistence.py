@@ -318,3 +318,30 @@ def load_coach_recommendation(user_id: str | None = None) -> dict[str, Any] | No
     except Exception:
         return None
     return payload
+
+
+def save_garmin_retry_state(retry_state: dict[str, Any], user_id: str | None = None) -> Path:
+    """Save Garmin retry state for rate-limit handling."""
+    filename = _resolve_file("garmin_retry_state.json", user_id=user_id)
+    output = {
+        "updated_at": datetime.now().isoformat(),
+        "state": retry_state,
+    }
+    filename.write_text(json.dumps(output, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    logger.debug(f"Retry state saved: {retry_state}")
+    return filename
+
+
+def load_garmin_retry_state(user_id: str | None = None) -> dict[str, Any]:
+    """Load Garmin retry state, or return empty dict if none exists."""
+    filename = _resolve_file("garmin_retry_state.json", user_id=user_id)
+    
+    if not filename.exists():
+        return {}
+    
+    try:
+        data = json.loads(filename.read_text(encoding="utf-8"))
+        state = data.get("state", {})
+        return state if isinstance(state, dict) else {}
+    except json.JSONDecodeError:
+        return {}

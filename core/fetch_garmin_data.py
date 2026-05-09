@@ -12,7 +12,15 @@ from typing import Any
 from dotenv import load_dotenv
 from garminconnect import Garmin
 
-from .data_persistence import load_garmin_credentials, save_daily_stats, save_activities
+from .data_persistence import (
+    load_garmin_credentials,
+    save_daily_stats,
+    save_activities,
+    load_daily_stats,
+    load_activities,
+    load_garmin_retry_state,
+    save_garmin_retry_state,
+)
 
 try:
     # Optional specific exceptions from garminconnect.
@@ -27,6 +35,104 @@ except ImportError:
     GarminConnectTooManyRequestsError = Exception
 
 logger = logging.getLogger(__name__)
+
+
+def _calculate_next_retry_time(retry_count: int) -> datetime:
+    """Calculate next retry time with exponential backoff.
+    
+    Retry schedule:
+    - Attempt 0 (first failure): retry in 1 hour
+    - Attempt 1 (second failure): retry in 4 hours
+    - Attempt 2 (third failure): retry in 24 hours
+    - Attempt 3+ (fourth+ failure): retry in 48 hours
+    """
+    delays = [
+        timedelta(hours=1),    # First failure
+        timedelta(hours=4),    # Second failure
+        timedelta(hours=24),   # Third failure
+        timedelta(hours=48),   # Fourth+ failure
+    ]
+    delay = delays[min(retry_count, len(delays) - 1)]
+    next_retry = datetime.now() + delay
+    return next_retry
+
+
+def _should_attempt_garmin_fetch(user_id: str | None = None) -> tuple[bool, dict[str, Any]]:
+    """Check if we should attempt Garmin fetch, or if in retry backoff.
+    
+    Returns:
+        (should_attempt, retry_state_dict)
+    """
+    retry_state = load_garmin_retry_state(user_id=user_id)
+    
+    if not retry_state:
+        # No previous failure, attempt fetch
+        logger.debug("No retry state found, attempting Garmin fetch")
+        return True, {}
+    
+    next_retry_str = retry_state.get("next_retry_time")
+    if not next_retry_str:
+        logger.debug("Retry state exists but no next_retry_time, attempting fetch")
+        return True, retry_state
+    
+    try:
+        next_retry = datetime.fromisoformat(next_retry_str)
+        now = datetime.now()
+        
+        if now >= next_retry:
+            logger.info(f"Retry time reached ({next_retry_str}), attempting Garmin fetch")
+            return True, retry_state
+        else:
+            remaining = next_retry - now
+            logger.warning(
+                f"Still in retry backoff. Next attempt: {next_retry_str} "
+                f"({remaining.total_seconds() / 3600:.1f}h from now)"
+            )
+            return False, retry_state
+    except Exception as e:
+        logger.warning(f"Could not parse next_retry_time: {e}, attempting fetch anyway")
+        return True, retry_state
+
+
+def _record_garmin_failure(reason: str, user_id: str | None = None) -> None:
+    """Record a Garmin fetch failure and schedule next retry."""
+    retry_state = load_garmin_retry_state(user_id=user_id)
+    retry_count = retry_state.get("retry_count", 0)
+    
+    next_retry = _calculate_next_retry_time(retry_count)
+    
+    updated_state = {
+        "retry_count": retry_count + 1,
+        "last_failure_time": datetime.now().isoformat(),
+        "last_failure_reason": reason,
+        "next_retry_time": next_retry.isoformat(),
+    }
+    
+    save_garmin_retry_state(updated_state, user_id=user_id)
+    
+    hours_until = (next_retry - datetime.now()).total_seconds() / 3600
+    logger.warning(
+        f"Garmin fetch failed ({reason}). "
+        f"Will retry in {hours_until:.1f}h ({next_retry.isoformat()})"
+    )
+
+
+def _clear_garmin_retry_state(user_id: str | None = None) -> None:
+    """Clear retry state after successful fetch."""
+    save_garmin_retry_state({}, user_id=user_id)
+    logger.info("Garmin fetch successful, retry state cleared")
+
+
+def _get_cached_daily_stats(user_id: str | None = None) -> dict[str, Any]:
+    """Get most recent cached daily stats."""
+    stats = load_daily_stats(user_id=user_id)
+    if stats:
+        # Find most recent date
+        most_recent_date = max(stats.keys()) if stats else None
+        if most_recent_date:
+            logger.warning(f"Using cached daily stats from {most_recent_date}")
+            return stats
+    return {}
 
 
 
@@ -314,6 +420,27 @@ def main() -> int:
         )
         return 1
 
+    # ===== Check if we should attempt Garmin fetch or use cached data =====
+    should_attempt, retry_state = _should_attempt_garmin_fetch(user_id=user_id)
+    
+    if not should_attempt:
+        logger.warning("Skipping Garmin fetch due to rate-limit backoff. Using cached data.")
+        # Load and return cached data
+        cached_stats = _get_cached_daily_stats(user_id=user_id)
+        cached_activities = load_activities(user_id=user_id)
+        if cached_stats or cached_activities:
+            if cached_stats:
+                logger.info(f"Saving {len(cached_stats)} cached daily stats")
+                save_daily_stats(cached_stats, user_id=user_id or None)
+            if cached_activities:
+                logger.info(f"Saving {len(cached_activities)} cached activities")
+                save_activities(cached_activities, user_id=user_id or None)
+            logger.info("Garmin data fetch completed (using cache)")
+            return 0
+        else:
+            logger.warning("No cached data available. Attempt skipped.")
+            return 1
+
     logger.info("Attempting Garmin login...")
     try:
         client = Garmin(email=email, password=password)
@@ -322,17 +449,38 @@ def main() -> int:
         logger.info("Garmin login successful")
     except GarminConnectAuthenticationError as e:
         logger.error(f"Login failed: please check your email/password. {e}")
+        _record_garmin_failure("auth_error", user_id=user_id)
         return 1
     except GarminConnectConnectionError as e:
-        logger.error(f"Connection error during Garmin login: {e}")
-        logger.debug(f"Full error details: {type(e).__name__}: {str(e)}")
+        error_msg = str(e)
+        if "429" in error_msg or "rate limit" in error_msg.lower():
+            logger.error(f"Rate limit error from Garmin: {e}")
+            _record_garmin_failure("rate_limit_429", user_id=user_id)
+        elif "CAPTCHA" in error_msg:
+            logger.error(f"CAPTCHA required by Garmin: {e}")
+            _record_garmin_failure("captcha_required", user_id=user_id)
+        else:
+            logger.error(f"Connection error during Garmin login: {e}")
+            _record_garmin_failure("connection_error", user_id=user_id)
+        # Try to use cached data
+        cached_stats = _get_cached_daily_stats(user_id=user_id)
+        cached_activities = load_activities(user_id=user_id)
+        if cached_stats or cached_activities:
+            if cached_stats:
+                save_daily_stats(cached_stats, user_id=user_id or None)
+            if cached_activities:
+                save_activities(cached_activities, user_id=user_id or None)
+            logger.info("Saved cached data, returning 0 (partial success)")
+            return 0
         return 1
     except GarminConnectTooManyRequestsError as e:
         logger.error(f"Too many requests to Garmin: {e}")
+        _record_garmin_failure("too_many_requests", user_id=user_id)
         return 1
     except Exception as exc:
         logger.error(f"Unexpected login error: {type(exc).__name__}: {exc}")
         logger.debug(f"Full traceback:", exc_info=True)
+        _record_garmin_failure(f"unexpected_{type(exc).__name__}", user_id=user_id)
         return 1
 
     today = date.today()
@@ -475,6 +623,8 @@ def main() -> int:
     except Exception as exc:
         logger.error(f"Error saving activities: {exc}")
 
+    # Clear retry state on successful fetch
+    _clear_garmin_retry_state(user_id=user_id)
     logger.info("Garmin data fetch completed successfully")
     return 0
 
