@@ -237,7 +237,29 @@ def _load_garmin_credentials_from_vault(user_id: str | None = None) -> dict[str,
     except Exception as e:
         logger.warning(f"Vault read error: {type(e).__name__}: {e}")
         return None
-logger.debug(f"Using Vault credentials for user {user_id}")
+
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    if isinstance(data, dict) and "data" in data:
+        data = data.get("data", {})
+    if not isinstance(data, dict):
+        logger.warning(f"Vault response data malformed: expected dict, got {type(data).__name__}")
+        return None
+
+    email = data.get("email") or data.get("GARMIN_EMAIL")
+    password = data.get("password") or data.get("GARMIN_PASSWORD")
+    if not email or not password:
+        logger.warning("Vault response missing email or password key")
+        return None
+    
+    logger.info(f"Credentials loaded from Vault: {email}")
+    return {"email": str(email).strip(), "password": str(password).strip()}
+
+
+def load_garmin_credentials(user_id: str | None = None) -> dict[str, Any]:
+    """Load stored Garmin login credentials for a specific user."""
+    vault_credentials = _load_garmin_credentials_from_vault(user_id=user_id)
+    if vault_credentials:
+        logger.debug(f"Using Vault credentials for user {user_id}")
         return vault_credentials
 
     filename = _resolve_file("garmin_credentials.json", user_id=user_id)
@@ -255,29 +277,7 @@ logger.debug(f"Using Vault credentials for user {user_id}")
             logger.info(f"Credentials loaded from JSON: {email}")
         return credentials if isinstance(credentials, dict) else {}
     except json.JSONDecodeError as e:
-        logger.warning(f"JSON decode error in credentials file: {e}")sponse missing email or password key")
-        return None
-    
-    logger.info(f"Credentials loaded from Vault: {email}")
-    return {"email": str(email).strip(), "password": str(password).strip()}
-
-
-def load_garmin_credentials(user_id: str | None = None) -> dict[str, Any]:
-    """Load stored Garmin login credentials for a specific user."""
-    vault_credentials = _load_garmin_credentials_from_vault(user_id=user_id)
-    if vault_credentials:
-        return vault_credentials
-
-    filename = _resolve_file("garmin_credentials.json", user_id=user_id)
-
-    if not filename.exists():
-        return {}
-
-    try:
-        data = json.loads(filename.read_text(encoding="utf-8"))
-        credentials = data.get("credentials", {})
-        return credentials if isinstance(credentials, dict) else {}
-    except json.JSONDecodeError:
+        logger.warning(f"JSON decode error in credentials file: {e}")
         return {}
 
 
