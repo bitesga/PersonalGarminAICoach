@@ -46,7 +46,15 @@ class _GarminLoginLogCapture(logging.Handler):
         self.messages: list[str] = []
 
     def emit(self, record: logging.LogRecord) -> None:
-        self.messages.append(self.format(record))
+        message = self.format(record)
+        self.messages.append(message)
+        lowered = message.lower()
+        if "widget+cffi failed" in lowered or "unexpected title 'garmin authentication application'" in lowered:
+            raise _AbortGarminLogin(message)
+
+
+class _AbortGarminLogin(RuntimeError):
+    pass
 
 
 def _looks_like_auth_failure_from_logs(messages: list[str]) -> bool:
@@ -503,6 +511,10 @@ def main() -> int:
             _record_garmin_failure("auth_error", user_id=user_id)
             return 1
         logger.info("Garmin login successful")
+    except _AbortGarminLogin as e:
+        logger.error(f"AUTH_ERROR: Garmin login stopped after widget auth failure. {e}")
+        _record_garmin_failure("auth_error", user_id=user_id)
+        return 1
     except GarminConnectAuthenticationError as e:
         logger.error(f"AUTH_ERROR: Login failed: please check your email/password. {e}")
         _record_garmin_failure("auth_error", user_id=user_id)
