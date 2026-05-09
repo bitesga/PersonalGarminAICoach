@@ -12,7 +12,7 @@ from typing import Any
 from dotenv import load_dotenv
 from garminconnect import Garmin
 
-from data_persistence import load_garmin_credentials, save_daily_stats, save_activities
+from .data_persistence import load_garmin_credentials, save_daily_stats, save_activities
 
 try:
     # Optional specific exceptions from garminconnect.
