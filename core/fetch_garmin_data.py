@@ -40,6 +40,29 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class _GarminLoginLogCapture(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(level=logging.INFO)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(self.format(record))
+
+
+def _looks_like_auth_failure_from_logs(messages: list[str]) -> bool:
+    combined = "\n".join(messages).lower()
+    return any(
+        marker in combined
+        for marker in (
+            "unexpected title 'garmin authentication application'",
+            "login failed",
+            "invalid password",
+            "incorrect password",
+            "authentication required",
+        )
+    )
+
+
 def _is_authentication_error_message(message: str) -> bool:
     lowered = message.lower()
     return any(
@@ -467,10 +490,18 @@ def main() -> int:
             return 1
 
     logger.info("Attempting Garmin login...")
+    garmin_logger = logging.getLogger("garminconnect.client")
+    login_capture = _GarminLoginLogCapture()
+    login_capture.setFormatter(logging.Formatter("%(levelname)s - %(message)s"))
+    garmin_logger.addHandler(login_capture)
     try:
         client = Garmin(email=email, password=password)
         logger.debug(f"Garmin client created, calling login()...")
         client.login()
+        if _looks_like_auth_failure_from_logs(login_capture.messages):
+            logger.error("AUTH_ERROR: Garmin sign-in page indicated invalid credentials.")
+            _record_garmin_failure("auth_error", user_id=user_id)
+            return 1
         logger.info("Garmin login successful")
     except GarminConnectAuthenticationError as e:
         logger.error(f"AUTH_ERROR: Login failed: please check your email/password. {e}")
@@ -510,6 +541,8 @@ def main() -> int:
         logger.debug(f"Full traceback:", exc_info=True)
         _record_garmin_failure(f"unexpected_{type(exc).__name__}", user_id=user_id)
         return 1
+    finally:
+        garmin_logger.removeHandler(login_capture)
 
     today = date.today()
     today_iso = today.isoformat()
