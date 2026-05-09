@@ -7,7 +7,10 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/home/ubuntu/PersonalGarminAICoach
 EnvironmentFile=/home/ubuntu/PersonalGarminAICoach/.env
-ExecStart=/usr/bin/python3 -m streamlit run /home/ubuntu/PersonalGarminAICoach/web/app.py --server.port=8080 --server.address=0.0.0.0
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+ExecStart=/home/ubuntu/PersonalGarminAICoach/.venv/bin/python -m streamlit run /home/ubuntu/PersonalGarminAICoach/web/app.py --server.port=8080 --server.address=0.0.0.0
 Restart=always
 RestartSec=20
 
