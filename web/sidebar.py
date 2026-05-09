@@ -8,6 +8,9 @@ import sys
 from datetime import datetime, time as time_type
 from pathlib import Path
 from typing import Any
+import urllib.error
+import urllib.parse
+import urllib.request
 
 import streamlit as st
 
@@ -72,6 +75,45 @@ def _parse_time_value(value: Any, default_value: str) -> time_type:
         except ValueError:
             pass
     return datetime.strptime(default_value, "%H:%M").time()
+
+
+def _search_city_candidates(city_name: str, language: str = "en") -> list[dict[str, Any]]:
+    query = str(city_name).strip()
+    if not query:
+        return []
+
+    params = urllib.parse.urlencode(
+        {
+            "name": query,
+            "count": 10,
+            "language": language,
+            "format": "json",
+        }
+    )
+    url = f"https://geocoding-api.open-meteo.com/v1/search?{params}"
+
+    request = urllib.request.Request(url, headers={"User-Agent": "PersonalGarminAICoach/1.0"}, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError):
+        return []
+
+    results = payload.get("results", []) if isinstance(payload, dict) else []
+    return [item for item in results if isinstance(item, dict)]
+
+
+def _format_city_option(item: dict[str, Any]) -> str:
+    name = str(item.get("name") or "Unknown")
+    admin1 = str(item.get("admin1") or "").strip()
+    country = str(item.get("country") or item.get("country_code") or "").strip()
+    latitude = item.get("latitude")
+    longitude = item.get("longitude")
+    location_parts = [part for part in [admin1, country] if part]
+    location = ", ".join(location_parts)
+    if location:
+        return f"{name} ({location}) [{latitude}, {longitude}]"
+    return f"{name} [{latitude}, {longitude}]"
 
 
 def _get_last_fetch_timestamp() -> str:
@@ -186,6 +228,9 @@ def init_state(user_id: str) -> None:
     st.session_state.setdefault("coach_status_lines", ["Ready."])
     st.session_state.setdefault("coach_status_level", "info")
     st.session_state.setdefault("discord_verified", bool(profile.get("discord_user_id", "").strip()))
+    st.session_state.setdefault("city_search_query", "")
+    st.session_state.setdefault("city_search_results", [])
+    st.session_state.setdefault("city_selected_index", 0)
 
 
 def _set_coach_status(lines: list[str], level: str = "info") -> None:
@@ -251,6 +296,42 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
             help=tr("Extra notes the coach should consider.", "Zusatzhinweise fuer den Coach."),
         )
         st.markdown(f"#### {tr('Location', 'Standort')}")
+        st.text_input(
+            tr("City", "Stadt"),
+            key="city_search_query",
+            placeholder=tr("e.g. Frankfurt", "z.B. Frankfurt"),
+            help=tr("Search your city and auto-fill coordinates.", "Suche deine Stadt und setze die Koordinaten automatisch."),
+        )
+        search_city_clicked = st.button(tr("Search city", "Stadt suchen"), width="stretch", key="search_city_btn")
+        if search_city_clicked:
+            language = str(st.session_state.get("ui_language", "en")).strip().lower()
+            search_lang = "de" if language == "de" else "en"
+            results = _search_city_candidates(st.session_state.city_search_query, language=search_lang)
+            st.session_state.city_search_results = results
+            st.session_state.city_selected_index = 0
+            if results:
+                st.success(tr("City results loaded.", "Stadtergebnisse geladen."))
+            else:
+                st.warning(tr("No matching city found.", "Keine passende Stadt gefunden."))
+
+        city_results = st.session_state.get("city_search_results", [])
+        if city_results:
+            options = [_format_city_option(item) for item in city_results]
+            selected_label = st.selectbox(
+                tr("Select city", "Stadt auswaehlen"),
+                options,
+                key="city_selection_label",
+            )
+            selected_index = options.index(selected_label)
+            selected_city = city_results[selected_index]
+            if st.button(tr("Use selected city", "Ausgewaehlte Stadt uebernehmen"), width="stretch", key="apply_city_btn"):
+                try:
+                    st.session_state.location_latitude_config = float(selected_city.get("latitude"))
+                    st.session_state.location_longitude_config = float(selected_city.get("longitude"))
+                    st.success(tr("Coordinates updated from city.", "Koordinaten aus Stadt uebernommen."))
+                except (TypeError, ValueError):
+                    st.error(tr("Could not apply coordinates for this city.", "Koordinaten fuer diese Stadt konnten nicht uebernommen werden."))
+
         st.number_input(
             tr("Latitude", "Breitengrad"),
             key="location_latitude_config",

@@ -60,7 +60,7 @@ def render_garmin_credentials_section() -> dict[str, str] | None:
         return None
 
     st.markdown(
-        f"<span style='color:#94a3b8; font-size:0.85rem'>{_tr('Note: The login data is stored locally for the active Discord user.', 'Hinweis: Die Login-Daten werden lokal fuer den aktiven Discord-Nutzer gespeichert.')}</span>",
+        f"<span style='color:#94a3b8; font-size:0.85rem'>{_tr('Note: Login data is securely stored in Vault for registered users.', 'Hinweis: Login-Daten werden sicher im Vault fuer registrierte Nutzer gespeichert.')}</span>",
         unsafe_allow_html=True,
     )
     return None
