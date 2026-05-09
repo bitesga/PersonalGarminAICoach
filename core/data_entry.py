@@ -52,7 +52,7 @@ def render_garmin_credentials_section() -> dict[str, str] | None:
             help=_tr("Password for your Garmin account", "Passwort fuer dein Garmin-Konto"),
         )
 
-    if st.button(_tr("✓ Connect Garmin account", "✓ Garmin-Konto verbinden"), key="connect_garmin_btn", use_container_width=True):
+    if st.button(_tr("✓ Connect Garmin account", "✓ Garmin-Konto verbinden"), key="connect_garmin_btn", width="stretch"):
         if email and password:
             st.success(_tr("Garmin account prepared successfully.", "Garmin-Konto erfolgreich vorbereitet."))
             return {"email": email.strip(), "password": password}

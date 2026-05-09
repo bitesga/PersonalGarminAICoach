@@ -398,6 +398,8 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
         output_parts.append(result.stderr.strip())
 
     combined_output = "\n\n".join(output_parts) if output_parts else "Garmin data was refreshed."
+    if "using cache" in combined_output.lower() or "completed (using cache)" in combined_output.lower():
+        combined_output = "[CACHE_USED]\n" + combined_output
     return result.returncode == 0, combined_output
 
 
@@ -502,8 +504,8 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
         )
         st.markdown("---")
         st.markdown("### Coach")
-        reload_clicked = st.button("Refresh Garmin data", use_container_width=True)
-        refresh_clicked = st.button("Refresh recommendation (AI)", use_container_width=True)
+        reload_clicked = st.button("Refresh Garmin data", width="stretch")
+        refresh_clicked = st.button("Refresh recommendation (AI)", width="stretch")
         status_box = st.empty()
         _render_coach_status(status_box)
         if reload_clicked:
@@ -511,11 +513,16 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
             with st.spinner("Refreshing Garmin data..."):
                 success, message = _reload_garmin_data(user_id)
             if success:
-                st.success("Garmin data updated.")
+                cache_used = message.startswith("[CACHE_USED]")
+                if cache_used:
+                    message = message.removeprefix("[CACHE_USED]\n")
+                    st.info("Garmin data updated from cached Garmin data.")
+                else:
+                    st.success("Garmin data updated.")
                 st.info(f"Last refresh: {_get_last_fetch_timestamp()}")
                 _set_coach_status(
                     [
-                        "Garmin data updated.",
+                        "Garmin data updated from cached Garmin data." if cache_used else "Garmin data updated.",
                         "Re-querying AI...",
                     ],
                     "info",
@@ -557,7 +564,7 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                     key="link_discord_target_config",
                     help="A 6-digit link code will be sent to this Discord ID.",
                 )
-                if st.button("Send code to Discord", use_container_width=True, key="send_link_discord_code_btn"):
+                if st.button("Send code to Discord", width="stretch", key="send_link_discord_code_btn"):
                     target_discord_id = str(st.session_state.link_discord_target_config).strip()
                     if not target_discord_id:
                         st.error("Please enter a Discord user ID.")
@@ -573,7 +580,7 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                             else:
                                 st.error(f"Discord send failed: {msg}")
                 st.text_input("Discord link code", key="link_discord_code_config", help="Enter the 6-digit code from Discord.")
-                if st.button("Link Discord", use_container_width=True, key="verify_link_discord_code_btn"):
+                if st.button("Link Discord", width="stretch", key="verify_link_discord_code_btn"):
                     target_discord_id = str(st.session_state.link_discord_target_config).strip()
                     code = str(st.session_state.link_discord_code_config).strip()
                     if not target_discord_id:
@@ -620,7 +627,7 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                     key="link_email_target_config",
                     help="A 6-digit link code will be sent to this address.",
                 )
-                if st.button("Send code to email", use_container_width=True, key="send_link_email_code_btn"):
+                if st.button("Send code to email", width="stretch", key="send_link_email_code_btn"):
                     target_email = str(st.session_state.link_email_target_config).strip().lower()
                     if not target_email:
                         st.error("Please enter an email address.")
@@ -642,7 +649,7 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                             else:
                                 st.error(f"Email send failed: {msg}")
                 st.text_input("Email link code", key="link_email_code_config", help="Enter the 6-digit code from the email.")
-                if st.button("Link email", use_container_width=True, key="verify_link_email_code_btn"):
+                if st.button("Link email", width="stretch", key="verify_link_email_code_btn"):
                     target_email = str(st.session_state.link_email_target_config).strip().lower()
                     code = str(st.session_state.link_email_code_config).strip()
                     if not target_email:
@@ -665,12 +672,12 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                             st.error("Link code is invalid or expired.")
 
         st.markdown("---")
-        save_clicked = st.button("Save profile", use_container_width=True)
+        save_clicked = st.button("Save profile", width="stretch")
         if save_clicked:
             _save_profile_from_sidebar(user_id=user_id)
             st.success("Profile saved")
 
-        logout_clicked = st.button("Log out", use_container_width=True)
+        logout_clicked = st.button("Log out", width="stretch")
         if logout_clicked:
             st.session_state.discord_verified = False
             _clear_auth_query_param()
@@ -954,7 +961,7 @@ def _render_metric_history_tabs(daily_stats: dict[str, Any]) -> None:
             )
             .properties(height=160)
         )
-        st.altair_chart(chart, use_container_width=True)
+        st.altair_chart(chart, width="stretch")
 
     latest = _latest_day(daily_stats)
     training_balance_feedback = str(latest.get("training_balance_feedback", "N/A")).strip()
@@ -1049,7 +1056,7 @@ def _render_activities(activities: list[dict[str, Any]]) -> None:
                 tr("Distance", "Distanz"): _format_distance(activity.get("distance", "n/a")) if activity.get("distance") else "—",
             }
         )
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, width="stretch", hide_index=True)
 
 
 def _render_recommendation(recommendation: dict[str, Any]) -> None:
@@ -1209,9 +1216,9 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
     )
     apply_col, real_col = st.columns(2)
     with apply_col:
-        apply_manual_weather = st.button(tr("Apply manual", "Manuell anwenden"), use_container_width=True, key="apply_manual_weather_btn")
+        apply_manual_weather = st.button(tr("Apply manual", "Manuell anwenden"), width="stretch", key="apply_manual_weather_btn")
     with real_col:
-        use_real_weather = st.button(tr("Use real data", "Echte Daten nutzen"), use_container_width=True, key="use_real_weather_btn")
+        use_real_weather = st.button(tr("Use real data", "Echte Daten nutzen"), width="stretch", key="use_real_weather_btn")
 
     if apply_manual_weather:
         latitude, longitude = _resolve_location(profile)

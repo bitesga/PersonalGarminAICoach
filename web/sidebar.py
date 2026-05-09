@@ -109,6 +109,8 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
         output_parts.append(result.stderr.strip())
 
     combined_output = "\n\n".join(output_parts) if output_parts else "Garmin data was refreshed."
+    if "using cache" in combined_output.lower() or "completed (using cache)" in combined_output.lower():
+        combined_output = "[CACHE_USED]\n" + combined_output
     return result.returncode == 0, combined_output
 
 
@@ -263,8 +265,8 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
         )
         st.markdown("---")
         st.markdown(f"### {tr('Coach', 'Coach')}")
-        reload_clicked = st.button(tr("Refresh Garmin data", "Garmin-Daten aktualisieren"), use_container_width=True)
-        refresh_clicked = st.button(tr("Refresh recommendation (AI)", "Empfehlung aktualisieren (KI)"), use_container_width=True)
+        reload_clicked = st.button(tr("Refresh Garmin data", "Garmin-Daten aktualisieren"), width="stretch")
+        refresh_clicked = st.button(tr("Refresh recommendation (AI)", "Empfehlung aktualisieren (KI)"), width="stretch")
         status_box = st.empty()
         _render_coach_status(status_box)
 
@@ -277,9 +279,18 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
             with st.spinner(tr("Refreshing Garmin data...", "Garmin-Daten werden aktualisiert...")):
                 success, message = _reload_garmin_data(user_id)
             if success:
-                st.success(tr("Garmin data updated.", "Garmin-Daten aktualisiert."))
+                cache_used = message.startswith("[CACHE_USED]")
+                if cache_used:
+                    message = message.removeprefix("[CACHE_USED]\n")
+                    st.info(tr("Garmin data updated from cached Garmin data.", "Garmin-Daten aus dem Cache aktualisiert."))
+                else:
+                    st.success(tr("Garmin data updated.", "Garmin-Daten aktualisiert."))
                 st.info(f"{tr('Last refresh', 'Letzte Aktualisierung')}: {_get_last_fetch_timestamp()}")
-                _set_coach_status([tr("Garmin data updated.", "Garmin-Daten aktualisiert.")], "success")
+                _set_coach_status([
+                    tr("Garmin data updated from cached Garmin data.", "Garmin-Daten aus dem Cache aktualisiert.")
+                    if cache_used
+                    else tr("Garmin data updated.", "Garmin-Daten aktualisiert.")
+                ], "success")
                 st.session_state.garmin_data_updated = True
                 _log_event("info", f"Garmin refresh succeeded for user {user_id}.")
             else:
@@ -292,14 +303,14 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
 
         if st.session_state.get("garmin_data_updated"):
             st.info(tr("Data updated. Load a new recommendation for this data?", "Daten aktualisiert. Neue Empfehlung fuer diese Daten laden?"))
-            if st.button(tr("Load new recommendation", "Neue Empfehlung laden"), use_container_width=True, key="refresh_after_reload"):
+            if st.button(tr("Load new recommendation", "Neue Empfehlung laden"), width="stretch", key="refresh_after_reload"):
                 st.session_state.garmin_data_updated = False
                 st.session_state.refresh_recommendation = True
                 st.session_state.trigger_notification_on_refresh = True
                 _set_coach_status([tr("Querying AI...", "KI wird abgefragt...")], "info")
                 _log_event("info", f"Recommendation requested after Garmin refresh for user {user_id}.")
                 st.rerun()
-            if st.button(tr("Not now", "Nicht jetzt"), use_container_width=True, key="skip_refresh_after_reload"):
+            if st.button(tr("Not now", "Nicht jetzt"), width="stretch", key="skip_refresh_after_reload"):
                 st.session_state.garmin_data_updated = False
                 _set_coach_status([tr("Ready.", "Bereit.")], "info")
                 _log_event("info", f"Recommendation skipped after Garmin refresh for user {user_id}.")
@@ -348,7 +359,7 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                 st.caption(tr("Discord is already linked.", "Discord ist bereits verknuepft."))
             else:
                 st.text_input(tr("Discord user ID to link", "Discord-Nutzer-ID zum Verknuepfen"), key="link_discord_target_config", help=tr("A 6-digit link code will be sent to this Discord ID.", "Ein 6-stelliger Link-Code wird an diese Discord-ID gesendet."))
-                if st.button(tr("Send code to Discord", "Code an Discord senden"), use_container_width=True, key="send_link_discord_code_btn"):
+                if st.button(tr("Send code to Discord", "Code an Discord senden"), width="stretch", key="send_link_discord_code_btn"):
                     target_discord_id = str(st.session_state.link_discord_target_config).strip()
                     if not target_discord_id:
                         st.error(tr("Please enter a Discord user ID.", "Bitte gib eine Discord-Nutzer-ID ein."))
@@ -364,7 +375,7 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                             else:
                                 st.error(f"{tr('Discord send failed', 'Discord-Senden fehlgeschlagen')}: {msg}")
                 st.text_input(tr("Discord link code", "Discord-Link-Code"), key="link_discord_code_config", help=tr("Enter the 6-digit code from Discord.", "Gib den 6-stelligen Code aus Discord ein."))
-                if st.button(tr("Link Discord", "Discord verknuepfen"), use_container_width=True, key="verify_link_discord_code_btn"):
+                if st.button(tr("Link Discord", "Discord verknuepfen"), width="stretch", key="verify_link_discord_code_btn"):
                     target_discord_id = str(st.session_state.link_discord_target_config).strip()
                     code = str(st.session_state.link_discord_code_config).strip()
                     if not target_discord_id:
@@ -401,7 +412,7 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                 st.caption(tr("Email is already linked.", "E-Mail ist bereits verknuepft."))
             else:
                 st.text_input(tr("Email to link", "E-Mail zum Verknuepfen"), key="link_email_target_config", help=tr("A 6-digit link code will be sent to this address.", "Ein 6-stelliger Link-Code wird an diese Adresse gesendet."))
-                if st.button(tr("Send code to email", "Code per E-Mail senden"), use_container_width=True, key="send_link_email_code_btn"):
+                if st.button(tr("Send code to email", "Code per E-Mail senden"), width="stretch", key="send_link_email_code_btn"):
                     target_email = str(st.session_state.link_email_target_config).strip().lower()
                     if not target_email:
                         st.error(tr("Please enter an email address.", "Bitte gib eine E-Mail-Adresse ein."))
@@ -420,7 +431,7 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                             else:
                                 st.error(f"{tr('Email send failed', 'E-Mail-Senden fehlgeschlagen')}: {msg}")
                 st.text_input(tr("Email link code", "E-Mail-Link-Code"), key="link_email_code_config", help=tr("Enter the 6-digit code from the email.", "Gib den 6-stelligen Code aus der E-Mail ein."))
-                if st.button(tr("Link email", "E-Mail verknuepfen"), use_container_width=True, key="verify_link_email_code_btn"):
+                if st.button(tr("Link email", "E-Mail verknuepfen"), width="stretch", key="verify_link_email_code_btn"):
                     target_email = str(st.session_state.link_email_target_config).strip().lower()
                     code = str(st.session_state.link_email_code_config).strip()
                     if not target_email:
@@ -441,12 +452,12 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                             st.error(tr("Link code is invalid or expired.", "Link-Code ist ungueltig oder abgelaufen."))
 
         st.markdown("---")
-        save_clicked = st.button(tr("Save profile", "Profil speichern"), use_container_width=True)
+        save_clicked = st.button(tr("Save profile", "Profil speichern"), width="stretch")
         if save_clicked:
             _save_profile_from_sidebar(user_id=user_id)
             st.success(tr("Profile saved", "Profil gespeichert"))
 
-        logout_clicked = st.button(tr("Log out", "Abmelden"), use_container_width=True)
+        logout_clicked = st.button(tr("Log out", "Abmelden"), width="stretch")
         if logout_clicked:
             st.session_state.discord_verified = False
             st.query_params.pop("auth", None)
