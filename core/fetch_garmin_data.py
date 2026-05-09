@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 import argparse
+import logging
 import os
 from pathlib import Path
 import sys
@@ -24,6 +25,8 @@ except ImportError:
     GarminConnectAuthenticationError = Exception
     GarminConnectConnectionError = Exception
     GarminConnectTooManyRequestsError = Exception
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -273,67 +276,94 @@ def _format_activity_time(activity: dict[str, Any]) -> str:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fetch Garmin data for a specific user.")
     parser.add_argument("--user-id", dest="user_id", default="", help="Discord user ID for scoped storage")
+    parser.add_argument("--debug", dest="debug", action="store_true", help="Enable debug logging")
     return parser.parse_args()
 
 
 def main() -> int:
     args = _parse_args()
+    
+    # Configure logging
+    log_level = logging.DEBUG if args.debug else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        stream=sys.stderr,
+    )
+    
     user_id = str(args.user_id).strip()
     env_path = Path(__file__).resolve().parents[1] / ".env"
     load_dotenv(dotenv_path=env_path)
+    
+    logger.info(f"Starting Garmin data fetch for user_id={user_id}")
 
+    logger.debug("Loading Garmin credentials...")
     stored_credentials = load_garmin_credentials(user_id=user_id) if user_id else {}
     email = stored_credentials.get("email") or os.getenv("GARMIN_EMAIL")
     password = stored_credentials.get("password") or os.getenv("GARMIN_PASSWORD")
+    
+    cred_source = "stored" if stored_credentials else "env"
+    logger.info(f"Using credentials from: {cred_source}")
+    if email:
+        logger.debug(f"Email: {email}")
 
     if not email or not password:
-        print(
-            (
-                "Missing credentials. Please add Garmin email and password in the app "
-                "or set GARMIN_EMAIL and GARMIN_PASSWORD in the .env file."
-            ),
-            file=sys.stderr,
+        logger.error(
+            "Missing credentials. Please add Garmin email and password in the app "
+            "or set GARMIN_EMAIL and GARMIN_PASSWORD in the .env file."
         )
         return 1
 
+    logger.info("Attempting Garmin login...")
     try:
         client = Garmin(email=email, password=password)
+        logger.debug(f"Garmin client created, calling login()...")
         client.login()
-    except GarminConnectAuthenticationError:
-        print("Login failed: please check your email/password.", file=sys.stderr)
+        logger.info("Garmin login successful")
+    except GarminConnectAuthenticationError as e:
+        logger.error(f"Login failed: please check your email/password. {e}")
         return 1
-    except GarminConnectConnectionError:
-        print("Connection error during Garmin login. Please try again later.", file=sys.stderr)
+    except GarminConnectConnectionError as e:
+        logger.error(f"Connection error during Garmin login: {e}")
+        logger.debug(f"Full error details: {type(e).__name__}: {str(e)}")
         return 1
-    except GarminConnectTooManyRequestsError:
-        print("Too many requests to Garmin. Please wait briefly and try again.", file=sys.stderr)
+    except GarminConnectTooManyRequestsError as e:
+        logger.error(f"Too many requests to Garmin: {e}")
         return 1
     except Exception as exc:
-        print(f"Unexpected login error: {exc}", file=sys.stderr)
+        logger.error(f"Unexpected login error: {type(exc).__name__}: {exc}")
+        logger.debug(f"Full traceback:", exc_info=True)
         return 1
 
     today = date.today()
     today_iso = today.isoformat()
+    logger.info(f"Today's date: {today_iso}")
 
     # ===== Fetch user profile (for potential VO2Max and other profile metrics) =====
+    logger.debug("Fetching user profile...")
     try:
         user_profile = _call_with_backoff(client.get_user_profile)
+        logger.debug(f"User profile fetched successfully")
     except Exception as e:
-        print(f"Warning: could not fetch profile: {e}", file=sys.stderr)
+        logger.warning(f"Could not fetch profile: {e}")
         user_profile = {}
 
     # ===== Fetch training load metrics =====
+    logger.debug("Fetching training load metrics...")
     try:
         training_status = _call_with_backoff(client.get_training_status, today_iso)
         training_load = _extract_training_load(training_status)
         training_balance_feedback = _extract_training_balance_feedback(training_status)
+        logger.debug(f"Training load: {training_load}, feedback: {training_balance_feedback}")
     except Exception as e:
-        print(f"Warning: could not fetch training load: {e}", file=sys.stderr)
+        logger.warning(f"Could not fetch training load: {e}")
         training_load = "N/A"
         training_balance_feedback = "N/A"
 
     # ===== Fetch latest activity data =====
+    logger.debug("Fetching activities...")
     activities_all = _call_with_backoff(client.get_activities, 0, 7)
+    logger.info(f"Fetched {len(activities_all)} activities from Garmin")
     activities_to_save = []
     
     for idx, activity in enumerate(activities_all[:7]):
@@ -409,43 +439,43 @@ def main() -> int:
             }
             
             if day_offset == 0:
-                print(f"--- Garmin daily summary ({target_date}) ---")
-                print(f"Activity type: {activity_type}")
+                logger.info(f"--- Garmin daily summary ({target_date}) ---")
+                logger.info(f"Activity type: {activity_type}")
                 
                 # Label for activity_type based metric
                 activity_type_key = str(activity_type).lower()
                 if "strength" in activity_type_key or "weight" in activity_type_key:
-                    print(f"Exercises: {training_effect}")
+                    logger.info(f"Exercises: {training_effect}")
                 else:
-                    print(f"Training Effect: {training_effect}")
+                    logger.info(f"Training Effect: {training_effect}")
                 
-                print(f"Body Battery: {body_battery}")
-                print(f"Sleep Score: {sleep_score}")
-                print(f"Stress (average): {stress}")
-                print(f"VO2 Max: {vo2max}")
-                print(f"Resting HR: {rhr}")
-                print(f"Training load: {training_load}")
-                print(f"Training load (acute): {training_load}")
-                print(f"Training Balance: {training_balance_feedback}")
-                print()
+                logger.info(f"Body Battery: {body_battery}")
+                logger.info(f"Sleep Score: {sleep_score}")
+                logger.info(f"Stress (average): {stress}")
+                logger.info(f"VO2 Max: {vo2max}")
+                logger.info(f"Resting HR: {rhr}")
+                logger.info(f"Training load: {training_load}")
+                logger.info(f"Training load (acute): {training_load}")
+                logger.info(f"Training Balance: {training_balance_feedback}")
         except Exception as exc:
-            print(f"Error fetching stats for {target_date}: {exc}", file=sys.stderr)
+            logger.error(f"Error fetching stats for {target_date}: {exc}")
             pass
 
 
     # ===== Save to JSON =====
     try:
         stats_file = save_daily_stats(daily_stats_data, user_id=user_id or None)
-        print(f"Daily stats saved to: {stats_file}")
+        logger.info(f"Daily stats saved to: {stats_file}")
     except Exception as exc:
-        print(f"Error saving daily stats: {exc}", file=sys.stderr)
+        logger.error(f"Error saving daily stats: {exc}")
 
     try:
         activities_file = save_activities(activities_to_save, user_id=user_id or None)
-        print(f"Activities saved to: {activities_file}")
+        logger.info(f"Activities saved to: {activities_file}")
     except Exception as exc:
-        print(f"Error saving activities: {exc}", file=sys.stderr)
+        logger.error(f"Error saving activities: {exc}")
 
+    logger.info("Garmin data fetch completed successfully")
     return 0
 
 

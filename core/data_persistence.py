@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import logging
 import os
 from pathlib import Path
 import re
 from typing import Any
 import urllib.error
 import urllib.request
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_data_dir() -> Path:
@@ -199,13 +202,20 @@ def _load_garmin_credentials_from_vault(user_id: str | None = None) -> dict[str,
     vault_addr = os.getenv("VAULT_ADDR", "").strip()
     vault_token = os.getenv("VAULT_TOKEN", "").strip()
     if not vault_addr or not vault_token:
+        logger.debug("Vault disabled: VAULT_ADDR or VAULT_TOKEN not set")
         return None
 
     kv_path = os.getenv("VAULT_KV_PATH", "kv/garmin/default").strip()
+    original_path = kv_path
     if "{user_id}" in kv_path and user_id:
         kv_path = kv_path.replace("{user_id}", _safe_user_segment(user_id))
+        logger.debug(f"Vault path template expanded: {original_path} → {kv_path}")
+    else:
+        logger.debug(f"Vault path (no user_id template): {kv_path}")
 
     url = _vault_build_url(vault_addr, kv_path)
+    logger.debug(f"Vault URL: {url.replace(vault_token, '***TOKEN***')}")
+    
     request = urllib.request.Request(
         url,
         headers={"X-Vault-Token": vault_token},
@@ -214,19 +224,41 @@ def _load_garmin_credentials_from_vault(user_id: str | None = None) -> dict[str,
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+            logger.debug(f"Vault response status: {response.status}")
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Vault HTTP error {e.code}: {e.reason} at {url.replace(vault_token, '***')}")
         return None
+    except urllib.error.URLError as e:
+        logger.warning(f"Vault connection error: {e.reason}")
+        return None
+    except json.JSONDecodeError as e:
+        logger.warning(f"Vault JSON decode error: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Vault read error: {type(e).__name__}: {e}")
+        return None
+logger.debug(f"Using Vault credentials for user {user_id}")
+        return vault_credentials
 
-    data = payload.get("data", {}) if isinstance(payload, dict) else {}
-    if isinstance(data, dict) and "data" in data:
-        data = data.get("data", {})
-    if not isinstance(data, dict):
-        return None
+    filename = _resolve_file("garmin_credentials.json", user_id=user_id)
+    logger.debug(f"Attempting to load credentials from JSON: {filename}")
 
-    email = data.get("email") or data.get("GARMIN_EMAIL")
-    password = data.get("password") or data.get("GARMIN_PASSWORD")
-    if not email or not password:
+    if not filename.exists():
+        logger.debug(f"JSON credentials file does not exist: {filename}")
+        return {}
+
+    try:
+        data = json.loads(filename.read_text(encoding="utf-8"))
+        credentials = data.get("credentials", {})
+        if credentials:
+            email = credentials.get("email", "")
+            logger.info(f"Credentials loaded from JSON: {email}")
+        return credentials if isinstance(credentials, dict) else {}
+    except json.JSONDecodeError as e:
+        logger.warning(f"JSON decode error in credentials file: {e}")sponse missing email or password key")
         return None
+    
+    logger.info(f"Credentials loaded from Vault: {email}")
     return {"email": str(email).strip(), "password": str(password).strip()}
 
 
