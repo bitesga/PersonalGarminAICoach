@@ -250,7 +250,6 @@ Per-user data lives under `data/users/<user_id>/`:
 - `daily_stats.json` - last 7 days of health metrics
 - `activities.json` - last 7 activities
 - `coach_recommendation.json` - cached recommendation
-- `garmin_credentials.json` - stored Garmin login
 
 Global fallbacks (if per-user persistence fails):
 
@@ -260,18 +259,18 @@ Global fallbacks (if per-user persistence fails):
 
 ## Security Notes
 
-- Garmin credentials are stored in `garmin_credentials.json` for local use. If you plan to host real users, move secrets into a secure vault (for example, HashiCorp Vault, AWS Secrets Manager, or Azure Key Vault).
+- Garmin credentials are stored in Vault only. The app no longer keeps a local `garmin_credentials.json` file.
 - Longer term, prefer an OAuth-based flow if Garmin makes it available for small developers.
 
 ## Vault OSS Setup (Optional)
 
-If you run Vault OSS on your Ubuntu server, the app can read Garmin credentials directly from Vault and skip local JSON storage.
-When a user clicks **Connect Garmin Account** in the dashboard, the app now writes the credentials to both local JSON and Vault if `VAULT_ADDR` and `VAULT_TOKEN` are configured.
+If you run Vault OSS on your Ubuntu server, the app reads and writes Garmin credentials directly in Vault.
+When a user clicks **Connect Garmin Account** in the dashboard, the app writes the credentials to Vault if `VAULT_ADDR` and `VAULT_TOKEN` are configured.
 
 - The dashboard shows a one-time toast when Vault is enabled via env vars.
 - Vault access is controlled by `VAULT_ADDR`, `VAULT_TOKEN`, and `VAULT_KV_PATH`.
 - The app expects a KV v2 path like `kv/garmin/default` and supports per-user paths via `kv/garmin/{user_id}`.
-- If Vault is unavailable, the app falls back to the local JSON credential store.
+- If Vault is unavailable, the app cannot persist Garmin credentials and will raise an error on save.
 
 1. Install Vault OSS on the server.
 2. Initialize and unseal Vault.

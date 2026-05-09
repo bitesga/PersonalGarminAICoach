@@ -21,7 +21,7 @@ streamlit run web/app.py
   - Recent activities table
 
 - Data Sources tab
-  - Garmin credential capture (writes to local JSON and Vault when configured)
+  - Garmin credential capture (writes to Vault when configured)
   - Manual health entry
   - Manual activity entry
   - Deletion of manual entries

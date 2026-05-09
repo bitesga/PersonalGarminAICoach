@@ -170,23 +170,13 @@ def load_user_profile(user_id: str | None = None) -> dict[str, Any]:
         return {}
 
 
-def save_garmin_credentials(credentials: dict[str, Any], user_id: str | None = None) -> Path:
+def save_garmin_credentials(credentials: dict[str, Any], user_id: str | None = None) -> None:
     """Save Garmin login credentials for a specific user.
 
-    Credentials are stored locally in JSON and optionally in Vault.
+    Credentials are stored in Vault only.
     """
-    filename = _resolve_file("garmin_credentials.json", user_id=user_id)
-    output = {
-        "last_updated": datetime.now().isoformat(),
-        "credentials": credentials,
-    }
-    filename.write_text(json.dumps(output, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
-    logger.info(f"Credentials saved to JSON: {filename}")
-    
-    # Try to save to Vault as well (non-blocking)
-    _save_garmin_credentials_to_vault(credentials, user_id=user_id)
-    
-    return filename
+    if not _save_garmin_credentials_to_vault(credentials, user_id=user_id):
+        raise RuntimeError("Failed to save Garmin credentials to Vault")
 
 
 def _save_garmin_credentials_to_vault(credentials: dict[str, Any], user_id: str | None = None) -> bool:
@@ -315,24 +305,8 @@ def load_garmin_credentials(user_id: str | None = None) -> dict[str, Any]:
     if vault_credentials:
         logger.debug(f"Using Vault credentials for user {user_id}")
         return vault_credentials
-
-    filename = _resolve_file("garmin_credentials.json", user_id=user_id)
-    logger.debug(f"Attempting to load credentials from JSON: {filename}")
-
-    if not filename.exists():
-        logger.debug(f"JSON credentials file does not exist: {filename}")
-        return {}
-
-    try:
-        data = json.loads(filename.read_text(encoding="utf-8"))
-        credentials = data.get("credentials", {})
-        if credentials:
-            email = credentials.get("email", "")
-            logger.info(f"Credentials loaded from JSON: {email}")
-        return credentials if isinstance(credentials, dict) else {}
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON decode error in credentials file: {e}")
-        return {}
+    logger.debug("No Vault credentials available")
+    return {}
 
 
 def save_coach_recommendation(recommendation: dict[str, Any], user_id: str | None = None) -> Path:
