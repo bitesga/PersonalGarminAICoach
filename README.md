@@ -10,6 +10,7 @@ An autonomous Python app that analyzes Garmin fitness data and produces adaptive
 - Discord DM and email notifications
 - Automatic recommendations at two daily times (server-local time)
 - Weather-aware recommendations based on user location
+- English/German language switch in the UI and generated outputs
 - 6-hour cache to reduce LLM calls
 - Dockerfile and systemd service for deployment
 
@@ -100,6 +101,7 @@ VAULT_KV_PATH=kv/garmin/default
   - Training goal selection
   - Additional notes for the coach
   - Location (latitude/longitude) for weather-aware advice
+  - Language switch for English or German
 
 - Coach
   - Refresh Garmin data on demand
@@ -119,7 +121,17 @@ VAULT_KV_PATH=kv/garmin/default
   - Garmin credentials
   - Manual health metrics input
   - Manual activity input
+  - Manual weather testing values for recommendation checks
   - Delete manual entries
+
+## Language Settings
+
+The app includes a language selector in the top-right corner of the dashboard.
+
+- Supported languages: English and German.
+- The selected language is saved per user profile.
+- The coach output, dashboard labels, notifications, and email/Discord messages follow the selected language.
+- Automatic recommendations use the same saved language for each user.
 
 ## Automatic Recommendations
 
@@ -158,7 +170,9 @@ The coach can adjust recommendations based on current weather using Open-Meteo.
 
 - Location is configured in the sidebar (latitude/longitude) and saved per user.
 - Weather is fetched every 10 minutes while the dashboard is open.
-- If precipitation is present, wind is high, or temperatures are extreme, the coach prefers an indoor or gym alternative and briefly mentions the conditions.
+- The main recommendation is outdoor only when temperature is between 5°C and 35°C and precipitation is at most 20 mm.
+- Otherwise the main recommendation is indoor.
+- The recommendation and reasoning explicitly mention the weather values and the indoor/outdoor decision.
 - The same weather context is used for manual and automatic recommendations.
 
 ## Notifications
@@ -253,6 +267,9 @@ Global fallbacks (if per-user persistence fails):
 If you run Vault OSS on your Ubuntu server, the app can read Garmin credentials directly from Vault and skip local JSON storage.
 
 - The dashboard shows a one-time toast when Vault is enabled via env vars.
+- Vault access is controlled by `VAULT_ADDR`, `VAULT_TOKEN`, and `VAULT_KV_PATH`.
+- The app expects a KV v2 path like `kv/garmin/default` and supports per-user paths via `kv/garmin/{user_id}`.
+- If Vault is unavailable, the app falls back to the local JSON credential store.
 
 1. Install Vault OSS on the server.
 2. Initialize and unseal Vault.
@@ -267,6 +284,11 @@ If you run Vault OSS on your Ubuntu server, the app can read Garmin credentials 
   VAULT_TOKEN=your_vault_token
   VAULT_KV_PATH=kv/garmin/default
   ```
+
+Recommended example:
+
+- Shared mount: `kv/garmin/default`
+- Per-user mount: `kv/garmin/{user_id}`
 
 Per-user option:
 
