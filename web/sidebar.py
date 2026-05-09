@@ -111,6 +111,12 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
     combined_output = "\n\n".join(output_parts) if output_parts else "Garmin data was refreshed."
     if "using cache" in combined_output.lower() or "completed (using cache)" in combined_output.lower():
         combined_output = "[CACHE_USED]\n" + combined_output
+    if "AUTH_ERROR:" in combined_output:
+        combined_output = "[AUTH_ERROR]\n" + combined_output
+    if "RATE_LIMIT:" in combined_output:
+        combined_output = "[RATE_LIMIT]\n" + combined_output
+    if "CAPTCHA_REQUIRED:" in combined_output:
+        combined_output = "[CAPTCHA_REQUIRED]\n" + combined_output
     return result.returncode == 0, combined_output
 
 
@@ -278,6 +284,9 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
             _set_coach_status([tr("Refreshing Garmin data...", "Garmin-Daten werden aktualisiert...")], "info")
             with st.spinner(tr("Refreshing Garmin data...", "Garmin-Daten werden aktualisiert...")):
                 success, message = _reload_garmin_data(user_id)
+            auth_error = message.startswith("[AUTH_ERROR]")
+            rate_limit_error = message.startswith("[RATE_LIMIT]")
+            captcha_error = message.startswith("[CAPTCHA_REQUIRED]")
             if success:
                 cache_used = message.startswith("[CACHE_USED]")
                 if cache_used:
@@ -294,9 +303,25 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                 st.session_state.garmin_data_updated = True
                 _log_event("info", f"Garmin refresh succeeded for user {user_id}.")
             else:
-                st.error(tr("Garmin data could not be refreshed.", "Garmin-Daten konnten nicht aktualisiert werden."))
-                _set_coach_status([tr("Garmin refresh failed.", "Garmin-Aktualisierung fehlgeschlagen."), message], "error")
-                _log_event("error", f"Garmin refresh failed for user {user_id}: {message}")
+                if auth_error:
+                    message = message.removeprefix("[AUTH_ERROR]\n")
+                    st.error(tr("Garmin login failed. Please check your email and password.", "Garmin-Login fehlgeschlagen. Bitte E-Mail und Passwort pruefen."))
+                    _set_coach_status([tr("Garmin login failed.", "Garmin-Login fehlgeschlagen."), message], "error")
+                    _log_event("error", f"Garmin auth failed for user {user_id}: {message}")
+                elif rate_limit_error:
+                    message = message.removeprefix("[RATE_LIMIT]\n")
+                    st.warning(tr("Garmin is rate limiting the server. Using cached data if available.", "Garmin limitiert den Server. Falls verfuegbar, werden Cache-Daten genutzt."))
+                    _set_coach_status([tr("Garmin rate limit detected.", "Garmin Rate-Limit erkannt."), message], "warning")
+                    _log_event("warning", f"Garmin rate limit for user {user_id}: {message}")
+                elif captcha_error:
+                    message = message.removeprefix("[CAPTCHA_REQUIRED]\n")
+                    st.error(tr("Garmin requires CAPTCHA approval. Cached data may be used instead.", "Garmin verlangt eine CAPTCHA-Freigabe. Stattdessen koennen Cache-Daten genutzt werden."))
+                    _set_coach_status([tr("Garmin CAPTCHA required.", "Garmin CAPTCHA erforderlich."), message], "error")
+                    _log_event("error", f"Garmin captcha required for user {user_id}: {message}")
+                else:
+                    st.error(tr("Garmin data could not be refreshed.", "Garmin-Daten konnten nicht aktualisiert werden."))
+                    _set_coach_status([tr("Garmin refresh failed.", "Garmin-Aktualisierung fehlgeschlagen."), message], "error")
+                    _log_event("error", f"Garmin refresh failed for user {user_id}: {message}")
             with st.expander(tr("Reload output", "Ausgabe aktualisieren"), expanded=not success):
                 st.code(message, language="text")
             st.rerun()

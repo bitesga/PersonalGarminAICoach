@@ -122,6 +122,11 @@ def _should_attempt_garmin_fetch(user_id: str | None = None) -> tuple[bool, dict
         # No previous failure, attempt fetch
         logger.debug("No retry state found, attempting Garmin fetch")
         return True, {}
+
+    # Credentials can be fixed by the user at any time; never back off auth failures.
+    if str(retry_state.get("last_failure_reason", "")).strip().lower() == "auth_error":
+        logger.info("Last failure was auth_error, attempting Garmin fetch without backoff")
+        return True, retry_state
     
     next_retry_str = retry_state.get("next_retry_time")
     if not next_retry_str:
@@ -523,6 +528,7 @@ def main() -> int:
         error_msg = str(e)
         if _is_authentication_error_message(error_msg):
             logger.error(f"AUTH_ERROR: Garmin login failed. Please check your email/password. {e}")
+            _record_garmin_failure("auth_error", user_id=user_id)
             return 1
         if "429" in error_msg or "rate limit" in error_msg.lower():
             logger.error(f"RATE_LIMIT: Rate limit error from Garmin: {e}")
