@@ -177,7 +177,8 @@ def save_garmin_credentials(credentials: dict[str, Any], user_id: str | None = N
     """
     if not _save_garmin_credentials_to_vault(credentials, user_id=user_id):
         raise RuntimeError("Failed to save Garmin credentials to Vault")
-
+        # Clear Garmin retry backoff state when credentials are updated
+        save_garmin_retry_state({}, user_id=user_id)
 
 def _save_garmin_credentials_to_vault(credentials: dict[str, Any], user_id: str | None = None) -> bool:
     """Save Garmin credentials to Vault KV store.

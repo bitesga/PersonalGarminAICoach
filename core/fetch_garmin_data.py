@@ -473,7 +473,7 @@ def main() -> int:
         client.login()
         logger.info("Garmin login successful")
     except GarminConnectAuthenticationError as e:
-        logger.error(f"Login failed: please check your email/password. {e}")
+        logger.error(f"AUTH_ERROR: Login failed: please check your email/password. {e}")
         _record_garmin_failure("auth_error", user_id=user_id)
         return 1
     except GarminConnectConnectionError as e:
@@ -482,10 +482,10 @@ def main() -> int:
             logger.error(f"AUTH_ERROR: Garmin login failed. Please check your email/password. {e}")
             return 1
         if "429" in error_msg or "rate limit" in error_msg.lower():
-            logger.error(f"Rate limit error from Garmin: {e}")
+            logger.error(f"RATE_LIMIT: Rate limit error from Garmin: {e}")
             _record_garmin_failure("rate_limit_429", user_id=user_id)
-        elif "CAPTCHA" in error_msg:
-            logger.error(f"CAPTCHA required by Garmin: {e}")
+        elif "captcha" in error_msg.lower():
+            logger.error(f"CAPTCHA_REQUIRED: CAPTCHA required by Garmin: {e}")
             _record_garmin_failure("captcha_required", user_id=user_id)
         else:
             logger.error(f"Connection error during Garmin login: {e}")

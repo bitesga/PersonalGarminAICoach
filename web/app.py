@@ -416,6 +416,10 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
         combined_output = "[CACHE_USED]\n" + combined_output
     if "AUTH_ERROR:" in combined_output:
         combined_output = "[AUTH_ERROR]\n" + combined_output
+    if "RATE_LIMIT:" in combined_output:
+        combined_output = "[RATE_LIMIT]\n" + combined_output
+    if "CAPTCHA_REQUIRED:" in combined_output:
+        combined_output = "[CAPTCHA_REQUIRED]\n" + combined_output
     return result.returncode == 0, combined_output
 
 
@@ -529,6 +533,8 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
             with st.spinner("Refreshing Garmin data..."):
                 success, message = _reload_garmin_data(user_id)
             auth_error = message.startswith("[AUTH_ERROR]")
+            rate_limit_error = message.startswith("[RATE_LIMIT]")
+            captcha_error = message.startswith("[CAPTCHA_REQUIRED]")
             if success:
                 cache_used = message.startswith("[CACHE_USED]")
                 if cache_used:
@@ -549,6 +555,14 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                     message = message.removeprefix("[AUTH_ERROR]\n")
                     st.error("Garmin login failed. Please check your email and password.")
                     _set_coach_status(["Garmin login failed.", message], "error")
+                elif rate_limit_error:
+                    message = message.removeprefix("[RATE_LIMIT]\n")
+                    st.warning("Garmin is rate limiting the server. Using cached data if available.")
+                    _set_coach_status(["Garmin rate limit detected.", message], "warning")
+                elif captcha_error:
+                    message = message.removeprefix("[CAPTCHA_REQUIRED]\n")
+                    st.error("Garmin requires CAPTCHA approval. Cached data may be used instead.")
+                    _set_coach_status(["Garmin CAPTCHA required.", message], "error")
                 else:
                     st.error("Garmin data could not be refreshed.")
                     _set_coach_status(["Garmin refresh failed.", message], "error")
