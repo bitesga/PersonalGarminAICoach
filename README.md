@@ -212,7 +212,7 @@ Then visit: `http://your-server-ip:8080`
 
 ## Systemd Service (Port 8080)
 
-A sample unit file is included as `PGAIC.service`. It matches the server layout used in production:
+A sample unit file is included as `personal-garmin-ai-coach.service`. It can also be enabled under the alias `PGAIC.service`:
 
 ```
 [Unit]
@@ -236,10 +236,10 @@ Enable the service and follow the logs:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable PGAIC.service
-sudo systemctl start PGAIC.service
-sudo systemctl status PGAIC.service
-sudo journalctl -u PGAIC.service -f
+sudo systemctl enable personal-garmin-ai-coach.service
+sudo systemctl start personal-garmin-ai-coach.service
+sudo systemctl status personal-garmin-ai-coach.service
+sudo journalctl -u personal-garmin-ai-coach.service -f
 ```
 
 ## Data Files
@@ -307,7 +307,7 @@ Per-user option:
 - `no handler for route`: the KV v2 mount path is incorrect or KV is not enabled.
 - `key not found`: the record does not exist at the provided `VAULT_KV_PATH`.
 - `connection refused`: Vault is not reachable at `VAULT_ADDR`.
-- To inspect the app logs on systemd, use `journalctl -u PGAIC.service -f`.
+- To inspect the app logs on systemd, use `journalctl -u personal-garmin-ai-coach.service -f`.
 
 ## Operational Notes
 
@@ -315,7 +315,7 @@ Per-user option:
 - If `GROQ_CLOUD_KEY` is missing, the coach uses deterministic fallbacks.
 - Email requires SMTP credentials; otherwise it is skipped.
 - The auto scheduler requires the Streamlit process to remain running.
-- The Streamlit service now logs to stderr, so `journalctl -u PGAIC.service -f` shows app logs and Vault credential save/load messages.
+- The Streamlit service now logs to stderr, so `journalctl -u personal-garmin-ai-coach.service -f` shows app logs and Vault credential save/load messages.
 
 ## License
 

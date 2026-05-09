@@ -74,4 +74,4 @@ Per-user data lives under `data/users/<user_id>/`:
 - If notifications do not send, confirm the relevant env vars are set
 - If recommendations are always local, verify `GROQ_CLOUD_KEY`
 - If Garmin refresh fails, validate credentials and check rate limits
-- If the Streamlit service is running under systemd, check `journalctl -u PGAIC.service -f` for app logs
+- If the Streamlit service is running under systemd, check `journalctl -u personal-garmin-ai-coach.service -f` for app logs
