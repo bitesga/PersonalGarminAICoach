@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import altair as alt
 import os
 import random
 import secrets
@@ -20,6 +21,7 @@ if str(ROOT_DIR) not in sys.path:
 if str(CORE_DIR) not in sys.path:
     sys.path.insert(0, str(CORE_DIR))
 
+from core.weather_service import fetch_current_weather
 from core import coach_agent
 from core import auto_recommendation
 from core.data_persistence import (
@@ -40,6 +42,7 @@ from core import data_entry
 from core.notification_service import send_verification_dm
 from web.auth import render_auth_gate
 from web.sidebar import init_state as init_sidebar_state, render_sidebar as render_sidebar_module
+from web.i18n import tr
 from datetime import datetime, timedelta
 
 
@@ -417,12 +420,39 @@ def _invoke_get_coach_recommendation(profile, daily_stats, activities, refresh: 
     func = coach_agent.get_coach_recommendation
     try:
         sig = inspect.signature(func)
+        if "user_id" in sig.parameters and "weather" in sig.parameters:
+            return func(
+                profile=profile,
+                daily_stats=daily_stats,
+                activities=activities,
+                refresh=refresh,
+                user_id=user_id,
+                weather=st.session_state.get("current_weather"),
+            )
+        if "weather" in sig.parameters:
+            return func(
+                profile=profile,
+                daily_stats=daily_stats,
+                activities=activities,
+                refresh=refresh,
+                weather=st.session_state.get("current_weather"),
+            )
         if "user_id" in sig.parameters:
             return func(profile=profile, daily_stats=daily_stats, activities=activities, refresh=refresh, user_id=user_id)
     except Exception:
         # If introspection fails, fall back to calling without user_id
         pass
     return func(profile=profile, daily_stats=daily_stats, activities=activities, refresh=refresh)
+
+
+def _resolve_location(profile: dict[str, Any]) -> tuple[float, float]:
+    lat = _to_number(profile.get("location_latitude"))
+    lon = _to_number(profile.get("location_longitude"))
+    if lat is None:
+        lat = 50.1155
+    if lon is None:
+        lon = 8.6842
+    return float(lat), float(lon)
 
 
 
@@ -825,8 +855,129 @@ def _render_summary_cards(daily_stats: dict[str, Any], activities: list[dict[str
                 f"<div style='color:#94a3b8; font-size:0.9rem; margin-top:0.15rem'>{suffix}</div>",
                 unsafe_allow_html=True,
             )
-    st.write("") 
-    if label == "Acute Load" and training_balance_feedback and training_balance_feedback != "N/A":
+    st.write("")
+
+
+def _render_weather_status(weather: dict[str, Any] | None, latitude: float, longitude: float) -> None:
+    st.markdown("<div class='card-soft'>", unsafe_allow_html=True)
+    st.markdown("<div class='small-label'>Weather Status</div>", unsafe_allow_html=True)
+    if not weather:
+        st.markdown(
+            f"<div class='metric-note'>Weather unavailable for {latitude:.4f}, {longitude:.4f}.</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
+
+    source = str(weather.get("source", "")) if isinstance(weather, dict) else ""
+    temperature = weather.get("temperature_c")
+    wind = weather.get("wind_speed_kmh")
+    precip = weather.get("precipitation_mm")
+    time_value = str(weather.get("time", "")).strip()
+    temp_text = f"{temperature:.1f} C" if isinstance(temperature, (int, float)) else "n/a"
+    wind_text = f"{wind:.1f} km/h" if isinstance(wind, (int, float)) else "n/a"
+    precip_text = f"{precip:.1f} mm" if isinstance(precip, (int, float)) else "n/a"
+
+    st.markdown(
+        f"<div style='font-size:1.05rem; font-weight:600;'>"
+        f"{temp_text} · Wind {wind_text} · Precip {precip_text}"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+    if time_value:
+        st.markdown(
+            f"<div class='metric-note'>Last update: {time_value}</div>",
+            unsafe_allow_html=True,
+        )
+    if source:
+        st.markdown(
+            f"<div class='metric-note'>Source: {source} · Location: {latitude:.4f}, {longitude:.4f}</div>",
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def _render_metric_history_tabs(daily_stats: dict[str, Any]) -> None:
+    if not daily_stats:
+        return
+
+    keys = sorted(daily_stats.keys())[-7:]
+    if not keys:
+        return
+
+    def _series_for(key_name: str) -> list[float]:
+        series: list[float] = []
+        for date_key in keys:
+            day = daily_stats.get(date_key, {})
+            if not isinstance(day, dict):
+                continue
+            value = _to_number(day.get(key_name))
+            if value is None:
+                continue
+            series.append(value)
+        return series
+
+    def _render_chart(series: list[float]) -> None:
+        if not series:
+            return
+        min_value = min(series)
+        max_value = max(series)
+        y_min = min_value - 10
+        y_max = max_value + 10
+        data = [{"idx": idx + 1, "value": value} for idx, value in enumerate(series)]
+        chart = (
+            alt.Chart(alt.Data(values=data))
+            .mark_line(point=True)
+            .encode(
+                x=alt.X("idx:Q", title=None),
+                y=alt.Y("value:Q", title=None, scale=alt.Scale(domain=[y_min, y_max])),
+                tooltip=[alt.Tooltip("idx:Q"), alt.Tooltip("value:Q")],
+            )
+            .properties(height=160)
+        )
+        st.altair_chart(chart, use_container_width=True)
+
+    latest = _latest_day(daily_stats)
+    training_balance_feedback = str(latest.get("training_balance_feedback", "N/A")).strip()
+
+    tabs = st.tabs(["Sleep Score", "VO2Max", "Stress", "Training Load", "RHR"])
+
+    with tabs[0]:
+        series = _series_for("sleep_score")
+        if series:
+            _render_chart(series)
+        else:
+            st.info("No sleep score history available.")
+
+    with tabs[1]:
+        series = _series_for("vo2_max")
+        if series:
+            _render_chart(series)
+        else:
+            st.info("No VO2Max history available.")
+
+    with tabs[2]:
+        series = _series_for("stress")
+        if series:
+            _render_chart(series)
+        else:
+            st.info("No stress history available.")
+
+    with tabs[3]:
+        series = _series_for("training_load_acute")
+        if series:
+            _render_chart(series)
+        else:
+            st.info("No training load history available.")
+
+    with tabs[4]:
+        series = _series_for("resting_heart_rate")
+        if series:
+            _render_chart(series)
+        else:
+            st.info("No resting heart rate history available.")
+
+    if training_balance_feedback and training_balance_feedback != "N/A":
         st.markdown(
             f"""
             <div style='margin-top:0.45rem; padding:0.35rem 0.65rem; border-radius:999px; display:inline-block; background:rgba(56, 189, 248, 0.12); border:1px solid rgba(56, 189, 248, 0.24); color:#e2e8f0; font-size:0.98rem; font-weight:800; letter-spacing:0.02em;'>
@@ -835,8 +986,6 @@ def _render_summary_cards(daily_stats: dict[str, Any], activities: list[dict[str
             """,
             unsafe_allow_html=True,
         )
-
-    st.write("")
 
 
 
@@ -877,8 +1026,9 @@ def _render_activities(activities: list[dict[str, Any]]) -> None:
         )
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
+
 def _render_recommendation(recommendation: dict[str, Any]) -> None:
-    st.markdown("<h3 class='section-title'>Next Training Recommendation</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 class='section-title'>{tr('Next Training Recommendation', 'Naechste Trainingsempfehlung')}</h3>", unsafe_allow_html=True)
     title = recommendation.get("title") or "Recommendation"
     recommendation_text = recommendation.get("recommendation") or "n/a"
     alternative_text = recommendation.get("alternative") or ""
@@ -888,10 +1038,10 @@ def _render_recommendation(recommendation: dict[str, Any]) -> None:
         f"""
                 <div class='card reco-box'>
                     <div class='reco-title'>{title}</div>
-                    <div class='reco-meta'>Intensity {intensity}/10 · Source {recommendation.get('source', 'model')}</div>
-                    <p><strong>Recommendation:</strong> {recommendation_text}</p>
-                    <p><strong>Alternative:</strong> {alternative_text or '-'}</p>
-                    <p><strong>Reasoning:</strong> {reasoning}</p>
+                    <div class='reco-meta'>{tr('Intensity', 'Intensitaet')} {intensity}/10 · {tr('Source', 'Quelle')} {recommendation.get('source', 'model')}</div>
+                    <p><strong>{tr('Recommendation', 'Empfehlung')}:</strong> {recommendation_text}</p>
+                    <p><strong>{tr('Alternative', 'Alternative')}:</strong> {alternative_text or '-'}</p>
+                    <p><strong>{tr('Reasoning', 'Begruendung')}:</strong> {reasoning}</p>
                 </div>
         """,
         unsafe_allow_html=True,
@@ -903,8 +1053,8 @@ def _render_recommendation(recommendation: dict[str, Any]) -> None:
 
 def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
     """Render the Data Sources tab with Garmin OAuth and manual entry forms."""
-    st.markdown("## Data Sources")
-    st.write("Connect your Garmin device or enter data manually.")
+    st.markdown(f"## {tr('Data Sources', 'Datenquellen')}")
+    st.write(tr("Connect your Garmin device or enter data manually.", "Verbinde dein Garmin-Geraet oder trage Daten manuell ein."))
     st.write("")
     _render_flash_message()
     
@@ -924,8 +1074,8 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
     st.markdown("---")
     
     # Manual health entry
-    st.markdown("### Manual data entry")
-    tab_health, tab_activity = st.tabs(["Health metrics", "Activity"])
+    st.markdown(f"### {tr('Manual data entry', 'Manuelle Dateneingabe')}")
+    tab_health, tab_activity = st.tabs([tr("Health metrics", "Gesundheitswerte"), tr("Activity", "Aktivitaet")])
     
     with tab_health:
         health_data = data_entry.render_manual_health_entry()
@@ -959,7 +1109,7 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
                 st.error(f"Failed to save: {exc}")
 
     st.markdown("---")
-    st.markdown("### Delete manual entries")
+    st.markdown(f"### {tr('Delete manual entries', 'Manuelle Eintraege loeschen')}")
 
     current_daily_stats = load_daily_stats(user_id=user_id)
     manual_health_entries = [
@@ -976,42 +1126,105 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
 
     delete_col1, delete_col2 = st.columns(2)
     with delete_col1:
-        st.markdown("#### Health metrics")
+        st.markdown(f"#### {tr('Health metrics', 'Gesundheitswerte')}")
         if manual_health_entries:
             health_labels = [
                 f"{date_key} · {str(entry.get('time', ''))[:5] if entry.get('time') else '--'}"
                 for date_key, entry in manual_health_entries
             ]
-            selected_health_label = st.selectbox("Select entry", health_labels, key="delete_health_select")
+            selected_health_label = st.selectbox(tr("Select entry", "Eintrag auswaehlen"), health_labels, key="delete_health_select")
             selected_health_index = health_labels.index(selected_health_label)
             selected_health_date = manual_health_entries[selected_health_index][0]
-            if st.button("Delete health metrics", key="delete_health_btn"):
+            if st.button(tr("Delete health metrics", "Gesundheitswerte loeschen"), key="delete_health_btn"):
                 delete_daily_stat(selected_health_date, user_id=user_id)
                 _set_flash_message(f"Health metrics deleted for {selected_health_date}.")
                 st.rerun()
         else:
-            st.info("No manual health metrics available.")
+            st.info(tr("No manual health metrics available.", "Keine manuellen Gesundheitswerte vorhanden."))
 
     with delete_col2:
-        st.markdown("#### Activities")
+        st.markdown(f"#### {tr('Activities', 'Aktivitaeten')}")
         if manual_activity_entries:
             activity_labels = [
                 f"{activity.get('date', 'n/a')} · {str(activity.get('time', ''))[:5] if activity.get('time') else '--'} · {activity.get('activity_type', 'n/a')}"
                 for activity in manual_activity_entries
             ]
-            selected_activity_label = st.selectbox("Select entry", activity_labels, key="delete_activity_select")
+            selected_activity_label = st.selectbox(tr("Select entry", "Eintrag auswaehlen"), activity_labels, key="delete_activity_select")
             selected_activity_index = activity_labels.index(selected_activity_label)
             selected_activity_id = str(manual_activity_entries[selected_activity_index].get("id", ""))
-            if st.button("Delete activity", key="delete_activity_btn"):
+            if st.button(tr("Delete activity", "Aktivitaet loeschen"), key="delete_activity_btn"):
                 delete_activity(selected_activity_id, user_id=user_id)
                 _set_flash_message(f"Activity {selected_activity_label} deleted.")
                 st.rerun()
         else:
-            st.info("No manual activities available.")
+            st.info(tr("No manual activities available.", "Keine manuellen Aktivitaeten vorhanden."))
+
+    st.markdown("---")
+    st.markdown(f"### {tr('Weather testing', 'Wetter-Test')}")
+    manual_temp = st.number_input(
+        tr("Temperature (C)", "Temperatur (C)"),
+        key="manual_weather_temp",
+        value=float(st.session_state.get("manual_weather_temp", 20.0)),
+        step=0.5,
+        format="%.1f",
+    )
+    manual_wind = st.number_input(
+        tr("Wind speed (km/h)", "Windgeschwindigkeit (km/h)"),
+        key="manual_weather_wind",
+        value=float(st.session_state.get("manual_weather_wind", 8.0)),
+        step=0.5,
+        format="%.1f",
+    )
+    manual_precip = st.number_input(
+        tr("Precipitation (mm)", "Niederschlag (mm)"),
+        key="manual_weather_precip",
+        value=float(st.session_state.get("manual_weather_precip", 0.0)),
+        step=0.5,
+        format="%.1f",
+    )
+    apply_col, real_col = st.columns(2)
+    with apply_col:
+        apply_manual_weather = st.button(tr("Apply manual", "Manuell anwenden"), use_container_width=True, key="apply_manual_weather_btn")
+    with real_col:
+        use_real_weather = st.button(tr("Use real data", "Echte Daten nutzen"), use_container_width=True, key="use_real_weather_btn")
+
+    if apply_manual_weather:
+        latitude, longitude = _resolve_location(profile)
+        st.session_state.manual_weather_override = True
+        st.session_state.current_weather = {
+            "source": "manual",
+            "time": datetime.utcnow().isoformat(timespec="seconds"),
+            "temperature_c": float(manual_temp),
+            "wind_speed_kmh": float(manual_wind),
+            "precipitation_mm": float(manual_precip),
+            "timezone": "UTC",
+            "latitude": latitude,
+            "longitude": longitude,
+        }
+        st.session_state.current_weather_at = datetime.utcnow()
+        st.success(tr("Manual weather applied.", "Manuelle Wetterdaten angewendet."))
+
+    if use_real_weather:
+        st.session_state.manual_weather_override = False
+        st.session_state.current_weather_at = None
+        st.success(tr("Real weather data enabled.", "Echte Wetterdaten aktiviert."))
+
+
+def _render_language_switcher() -> None:
+    st.session_state.setdefault("ui_language", "en")
+    left_col, right_col = st.columns([5, 1])
+    with right_col:
+        st.selectbox(
+            tr("Language 🌐", "Sprache 🌐"),
+            options=["en", "de"],
+            key="ui_language",
+            format_func=lambda v: "English" if v == "en" else "Deutsch",
+        )
 
 
 def main() -> None:
     auto_recommendation.start_scheduler()
+    _render_language_switcher()
     active_user_id = render_auth_gate()
     if not active_user_id:
         return
@@ -1025,9 +1238,29 @@ def main() -> None:
 
     profile, status_box = render_sidebar_module(user_id=active_user_id)
     coach_profile = _build_profile()
+
+    if os.getenv("VAULT_ADDR", "").strip() and os.getenv("VAULT_TOKEN", "").strip():
+        if not st.session_state.get("vault_notice_shown"):
+            st.toast("Secure Vault OSS is enabled for credential storage.", icon="✅")
+            st.session_state.vault_notice_shown = True
+
+    if "current_weather" not in st.session_state:
+        st.session_state.current_weather = None
+        st.session_state.current_weather_at = None
+
+    lat, lon = _resolve_location(profile)
+    last_weather_at = st.session_state.get("current_weather_at")
+    manual_override = bool(st.session_state.get("manual_weather_override", False))
+    refresh_weather = not manual_override
+    if refresh_weather and isinstance(last_weather_at, datetime):
+        refresh_weather = (datetime.utcnow() - last_weather_at).total_seconds() > 600
+    if refresh_weather:
+        weather = fetch_current_weather(lat, lon)
+        st.session_state.current_weather = weather
+        st.session_state.current_weather_at = datetime.utcnow()
     
     # Main tabs
-    tab_dashboard, tab_data_sources = st.tabs(["Dashboard", "Data Sources"])
+    tab_dashboard, tab_data_sources = st.tabs([tr("Dashboard", "Dashboard"), tr("Data Sources", "Datenquellen")])
     
     with tab_dashboard:
         refresh = bool(st.session_state.pop("refresh_recommendation", False))
@@ -1087,24 +1320,31 @@ def main() -> None:
                 _set_coach_status(["Refresh complete."], "success")
             _render_coach_status(status_box)
 
+        hero_text = tr(
+            "Fitness metrics, activities, and today's recommendation in one dashboard. The coach uses a 6-hour cache to save tokens.",
+            "Fitnesswerte, Aktivitaeten und die heutige Empfehlung in einem Dashboard. Der Coach nutzt einen 6-Stunden-Cache, um Tokens zu sparen.",
+        )
         st.markdown(
-            "<div class='hero'><h1>Personal Garmin AI Coach</h1><p>Fitness metrics, activities, and today's recommendation in one dashboard. The coach uses a 6-hour cache to save tokens.</p></div>",
+            f"<div class='hero'><h1>Personal Garmin AI Coach</h1><p>{hero_text}</p></div>",
             unsafe_allow_html=True,
         )
+        st.write("")
+        _render_weather_status(st.session_state.get("current_weather"), lat, lon)
         st.write("")
 
         # Only show data and recommendations if we have at least some data
         has_data = bool(daily_stats or activities)
         if not has_data:
-            st.info("📊 No data yet. Go to 'Data Sources' and connect Garmin or enter data manually.")
+            st.info(tr("📊 No data yet. Go to 'Data Sources' and connect Garmin or enter data manually.", "📊 Noch keine Daten. Gehe zu 'Datenquellen' und verbinde Garmin oder trage Daten manuell ein."))
         else:
             _render_summary_cards(daily_stats, activities)
+            _render_metric_history_tabs(daily_stats)
             st.write("")
             _render_recommendation(recommendation)
             _render_activities(activities)
     
     with tab_data_sources:
-        st.markdown(f"**Active user:** {active_user_id}")
+        st.markdown(f"**{tr('Active user', 'Aktiver Nutzer')}:** {active_user_id}")
         st.divider()
         _render_data_sources_tab(profile, user_id=active_user_id)
 

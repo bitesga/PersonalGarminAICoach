@@ -19,6 +19,7 @@ from core.data_persistence import (
     save_user_profile,
 )
 from core.notification_service import notify_recommendation
+from core.weather_service import fetch_current_weather
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -110,11 +111,40 @@ def _invoke_get_coach_recommendation(profile: coach_agent.CoachProfile, daily_st
     func = coach_agent.get_coach_recommendation
     try:
         sig = inspect.signature(func)
+        if "user_id" in sig.parameters and "weather" in sig.parameters:
+            return func(
+                profile=profile,
+                daily_stats=daily_stats,
+                activities=activities,
+                refresh=True,
+                user_id=user_id,
+                weather=_get_weather_from_profile(user_id),
+            )
+        if "weather" in sig.parameters:
+            return func(
+                profile=profile,
+                daily_stats=daily_stats,
+                activities=activities,
+                refresh=True,
+                weather=_get_weather_from_profile(user_id),
+            )
         if "user_id" in sig.parameters:
             return func(profile=profile, daily_stats=daily_stats, activities=activities, refresh=True, user_id=user_id)
     except Exception:
         pass
     return func(profile=profile, daily_stats=daily_stats, activities=activities, refresh=True)
+
+
+def _get_weather_from_profile(user_id: str) -> dict[str, Any] | None:
+    profile = load_user_profile(user_id=user_id) or {}
+    lat = profile.get("location_latitude")
+    lon = profile.get("location_longitude")
+    try:
+        latitude = float(lat)
+        longitude = float(lon)
+    except (TypeError, ValueError):
+        return None
+    return fetch_current_weather(latitude, longitude)
 
 
 def _run_for_user(user_id: str, profile: dict[str, Any], due_times: list[str], now: datetime) -> None:

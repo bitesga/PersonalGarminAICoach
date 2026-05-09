@@ -9,6 +9,7 @@ An autonomous Python app that analyzes Garmin fitness data and produces adaptive
 - Garmin Connect integration and manual data entry
 - Discord DM and email notifications
 - Automatic recommendations at two daily times (server-local time)
+- Weather-aware recommendations based on user location
 - 6-hour cache to reduce LLM calls
 - Dockerfile and systemd service for deployment
 
@@ -65,6 +66,11 @@ DISCORD_SERVER_INVITE=https://discord.gg/YOUR_SERVER_CODE
 # Optional email notifications
 MAIL_USERNAME=your_smtp_username
 MAIL_PASSWORD=your_smtp_password
+
+# Optional Vault OSS (secrets)
+VAULT_ADDR=http://127.0.0.1:8089
+VAULT_TOKEN=your_vault_token
+VAULT_KV_PATH=kv/garmin/default
 ```
 
 ## Quick Start (Local)
@@ -93,6 +99,7 @@ MAIL_PASSWORD=your_smtp_password
   - Mobility selection
   - Training goal selection
   - Additional notes for the coach
+  - Location (latitude/longitude) for weather-aware advice
 
 - Coach
   - Refresh Garmin data on demand
@@ -144,6 +151,15 @@ The coach is designed to be concrete and safe:
 - Caching
   - Recommendations are cached for 6 hours per user
   - `refresh=True` bypasses the cache
+
+## Weather Awareness
+
+The coach can adjust recommendations based on current weather using Open-Meteo.
+
+- Location is configured in the sidebar (latitude/longitude) and saved per user.
+- Weather is fetched every 10 minutes while the dashboard is open.
+- If precipitation is present, wind is high, or temperatures are extreme, the coach prefers an indoor or gym alternative and briefly mentions the conditions.
+- The same weather context is used for manual and automatic recommendations.
 
 ## Notifications
 
@@ -227,6 +243,45 @@ Global fallbacks (if per-user persistence fails):
 - `data/activities.json`
 - `data/coach_recommendation.json`
 
+## Security Notes
+
+- Garmin credentials are stored in `garmin_credentials.json` for local use. If you plan to host real users, move secrets into a secure vault (for example, HashiCorp Vault, AWS Secrets Manager, or Azure Key Vault).
+- Longer term, prefer an OAuth-based flow if Garmin makes it available for small developers.
+
+## Vault OSS Setup (Optional)
+
+If you run Vault OSS on your Ubuntu server, the app can read Garmin credentials directly from Vault and skip local JSON storage.
+
+- The dashboard shows a one-time toast when Vault is enabled via env vars.
+
+1. Install Vault OSS on the server.
+2. Initialize and unseal Vault.
+3. Enable KV v2 at the `kv` mount (or use your own mount name).
+4. Store Garmin credentials:
+  ```bash
+  vault kv put kv/garmin/default email=your_email@example.com password=your_password
+  ```
+5. Set these env vars in `.env` (or your systemd service):
+  ```env
+  VAULT_ADDR=http://127.0.0.1:8089
+  VAULT_TOKEN=your_vault_token
+  VAULT_KV_PATH=kv/garmin/default
+  ```
+
+Per-user option:
+
+- Use `VAULT_KV_PATH=kv/garmin/{user_id}` and store each user separately:
+  ```bash
+  vault kv put kv/garmin/discord_123456789 email=user@example.com password=secret
+  ```
+
+### Vault Troubleshooting
+
+- `permission denied`: the token does not have read access to the KV path.
+- `no handler for route`: the KV v2 mount path is incorrect or KV is not enabled.
+- `key not found`: the record does not exist at the provided `VAULT_KV_PATH`.
+- `connection refused`: Vault is not reachable at `VAULT_ADDR`.
+
 ## Operational Notes
 
 - Garmin endpoints can rate-limit if called too frequently; the fetch script uses backoff.
@@ -236,4 +291,4 @@ Global fallbacks (if per-user persistence fails):
 
 ## License
 
-This repository is private/personal. Add a license if you plan to distribute it.
+This repository is personal. 

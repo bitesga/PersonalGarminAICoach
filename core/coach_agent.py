@@ -170,6 +170,99 @@ def _normalize_recommendation_keys(recommendation: dict[str, Any]) -> dict[str, 
     return result
 
 
+def _normalize_language(language: str | None) -> str:
+    value = str(language or "en").strip().lower()
+    return "de" if value.startswith("de") else "en"
+
+
+def _lang_text(language: str, english: str, german: str) -> str:
+    return german if _normalize_language(language) == "de" else english
+
+
+def _weather_environment(weather: dict[str, Any] | None) -> str:
+    if not isinstance(weather, dict):
+        return "outdoor"
+    precip = _as_number(weather.get("precipitation_mm"))
+    temp = _as_number(weather.get("temperature_c"))
+    if temp is None or precip is None:
+        return "indoor"
+    if 5 <= temp <= 35 and precip <= 20:
+        return "outdoor"
+    return "indoor"
+
+
+def _strip_environment_prefix(text: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return ""
+    cleaned = re.sub(r"^(?:indoor|outdoor)\s+session\s*:\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"^(?:indoor|outdoor)\s+", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def _remove_conflicting_environment_claims(reasoning: str, environment: str) -> str:
+    text = (reasoning or "").strip()
+    if not text:
+        return ""
+
+    opposite = "outdoor" if environment == "indoor" else "indoor"
+    parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
+
+    filtered: list[str] = []
+    for sentence in parts:
+        lower = sentence.lower()
+        has_opposite = opposite in lower
+        has_decision_claim = any(
+            marker in lower
+            for marker in ["suitable", "preferred", "recommend", "chosen", "feasible", "ideal"]
+        )
+        if has_opposite and has_decision_claim:
+            continue
+        filtered.append(sentence)
+
+    return " ".join(filtered).strip()
+
+
+def _weather_reasoning_snippet(weather: dict[str, Any] | None, environment: str, language: str = "en") -> str:
+    env_text = _lang_text(language, environment, "innen" if environment == "indoor" else "aussen")
+    if not isinstance(weather, dict):
+        return _lang_text(
+            language,
+            f"Weather data unavailable; defaulting to {environment}.",
+            f"Wetterdaten nicht verfuegbar; Standard ist {env_text}.",
+        )
+    temp = _format_metric(weather.get("temperature_c"), ".1f")
+    wind = _format_metric(weather.get("wind_speed_kmh"), ".1f")
+    precip = _format_metric(weather.get("precipitation_mm"), ".1f")
+    return _lang_text(
+        language,
+        f"Weather: {temp} C, wind {wind} km/h, precip {precip} mm -> {environment}.",
+        f"Wetter: {temp} C, Wind {wind} km/h, Niederschlag {precip} mm -> {env_text}.",
+    )
+
+
+def _apply_weather_context(recommendation: dict[str, Any], weather: dict[str, Any] | None, language: str = "en") -> dict[str, Any]:
+    result = _normalize_recommendation_keys(recommendation)
+    language = _normalize_language(language)
+    environment = _weather_environment(weather)
+    recommendation_text = _strip_environment_prefix(str(result.get("recommendation", "")))
+    reasoning_text = str(result.get("reasoning", "")).strip()
+
+    recommendation_prefix = _lang_text(
+        language,
+        f"{environment.capitalize()} session:",
+        "Indoor-Session:" if environment == "indoor" else "Outdoor-Session:",
+    )
+    recommendation_text = f"{recommendation_prefix} {recommendation_text}".strip()
+    reasoning_text = _remove_conflicting_environment_claims(reasoning_text, environment)
+    snippet = _weather_reasoning_snippet(weather, environment, language=language)
+    reasoning_text = f"{reasoning_text} {snippet}".strip()
+
+    result["recommendation"] = recommendation_text
+    result["reasoning"] = reasoning_text
+    return result
+
+
 def load_coach_inputs(data_dir: Path | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     base_dir = data_dir or DATA_DIR
     daily_stats = _load_json_file(base_dir / "daily_stats.json", {})
@@ -178,7 +271,7 @@ def load_coach_inputs(data_dir: Path | None = None) -> tuple[dict[str, Any], lis
     return daily_stats, activities
 
 
-def _load_cached_recommendation(user_id: str | None = None) -> dict[str, Any] | None:
+def _load_cached_recommendation(user_id: str | None = None, language: str = "en") -> dict[str, Any] | None:
     payload = load_coach_recommendation(user_id=user_id)
     if not payload or not isinstance(payload, dict):
         return None
@@ -186,6 +279,11 @@ def _load_cached_recommendation(user_id: str | None = None) -> dict[str, Any] | 
     generated_at = payload.get("generated_at")
     recommendation = payload.get("recommendation")
     if not generated_at or not isinstance(recommendation, dict):
+        return None
+
+    expected_language = _normalize_language(language)
+    cached_language = _normalize_language(recommendation.get("language", "en"))
+    if cached_language != expected_language:
         return None
 
     try:
@@ -201,6 +299,7 @@ def _load_cached_recommendation(user_id: str | None = None) -> dict[str, Any] | 
     cached["source"] = "cache"
     cached["cached_at"] = generated_dt.isoformat()
     cached["cache_age_hours"] = round(age_hours, 2)
+    cached["language"] = cached_language
     return cached
 
 
@@ -289,7 +388,14 @@ def _calculate_goal_intensity_baseline(goal: str) -> int:
     return 6  # Default fallback
 
 
-def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activities: list[dict[str, Any]]) -> str:
+def build_coach_prompt(
+    profile: CoachProfile,
+    daily_stats: dict[str, Any],
+    activities: list[dict[str, Any]],
+    weather: dict[str, Any] | None = None,
+    language: str = "en",
+) -> str:
+    language = _normalize_language(language)
     assets = _load_prompt_assets()
     goal_intensity_baseline = _calculate_goal_intensity_baseline(profile.goal)
     
@@ -323,6 +429,8 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
             "acute_training_load": training_load_acute,
             "training_balance_feedback": training_balance_feedback,
         },
+        "weather": weather or {},
+        "output_language": language,
         "history_7_days": _compact_daily_stats(daily_stats),
         "recent_activities": _compact_activities(activities),
         "output_format": {
@@ -342,6 +450,9 @@ def build_coach_prompt(profile: CoachProfile, daily_stats: dict[str, Any], activ
             "ACTIVITIES: distance_km = absolute distance of the last activity; training_effect_score = aerobic/anaerobic stimulus score (1-5). Do NOT mix them up.",
             f"TRAINING LOAD: acute_training_load={training_load_acute} - If high (e.g., > 200), reduce recommended intensity by 2-3 points.",
             f"TRAINING BALANCE: training_balance_feedback='{training_balance_feedback}' - If 'AEROBIC_HIGH_SHORTAGE': recommend high intensity aerobic if aligned with goal. If 'AEROBIC_LOW_SHORTAGE': recommend low intensity aerobic. If 'ANAEROBIC': recommend strength/anaerobic stimulus.",
+            "WEATHER: if 5 <= temperature_c <= 35 and precipitation_mm <= 20, the main recommendation must be outdoor. Otherwise the main recommendation must be indoor.",
+            "ALWAYS: In the recommendation, explicitly start with 'Outdoor session:' or 'Indoor session:'. In the reasoning, cite the weather data and explain why indoor/outdoor was chosen.",
+            f"LANGUAGE: write title, recommendation, alternative and reasoning in '{language}' only.",
             "If data is strong and goal is Marathon, prefer a concrete long run, tempo run, or technique session over a general rule.",
             "No running intervals for wheelchair users; suggest handbike or upper-body strength-endurance instead.",
             "Prefer outdoor sessions when recovery is not critical.",
@@ -532,11 +643,11 @@ def _needs_enrichment(recommendation: dict[str, Any]) -> bool:
         return True
     if not alternative and "alternative:" not in rec_text:
         return True
-    if not any(marker in rec_text for marker in ["today", "now", "tomorrow"]):
+    if not any(marker in rec_text for marker in ["today", "now", "tomorrow", "heute", "morgen", "jetzt"]):
         return True
     if reason in {"", "n/a", "na", "none"}:
         return True
-    if not any(metric in reason for metric in ["sleep", "body battery", "stress", "vo2", "rhr", "activity"]):
+    if not any(metric in reason for metric in ["sleep", "body battery", "stress", "vo2", "rhr", "activity", "schlaf", "koerperbatterie", "aktivitaet"]):
         return True
     return False
 
@@ -589,6 +700,8 @@ def _enrich_recommendation(
     profile: CoachProfile,
     daily_stats: dict[str, Any],
     activities: list[dict[str, Any]],
+    weather: dict[str, Any] | None = None,
+    language: str = "en",
 ) -> dict[str, Any]:
     base = _concrete_next_training(profile, daily_stats, activities)
     result = _normalize_recommendation_keys(recommendation)
@@ -637,7 +750,7 @@ def _enrich_recommendation(
         if len(fallback_alt) > 1:
             result["alternative"] = fallback_alt[1].strip()
     
-    return result
+    return _apply_weather_context(result, weather, language=language)
 
 
 def _as_number(value: Any) -> float | None:
@@ -668,18 +781,21 @@ def generate_coach_recommendation(
     activities: list[dict[str, Any]] | None = None,
     refresh: bool = False,
     user_id: str | None = None,
+    weather: dict[str, Any] | None = None,
+    language: str = "en",
 ) -> dict[str, Any]:
+    language = _normalize_language(language)
     if daily_stats is None or activities is None:
         loaded_stats, loaded_activities = load_coach_inputs()
         daily_stats = daily_stats or loaded_stats
         activities = activities or loaded_activities
 
     if not refresh:
-        cached_recommendation = _load_cached_recommendation(user_id=user_id)
+        cached_recommendation = _load_cached_recommendation(user_id=user_id, language=language)
         if cached_recommendation is not None:
             return cached_recommendation
 
-    prompt = build_coach_prompt(profile, daily_stats, activities)
+    prompt = build_coach_prompt(profile, daily_stats, activities, weather=weather, language=language)
     last_error: Exception | None = None
 
     for attempt in range(1, 4):
@@ -689,9 +805,10 @@ def generate_coach_recommendation(
             _log_llm_raw_response(response_text)
             recommendation = _extract_json_response(response_text)
             recommendation = _normalize_recommendation_keys(recommendation)
-            recommendation = _enrich_recommendation(recommendation, profile, daily_stats, activities)
+            recommendation = _enrich_recommendation(recommendation, profile, daily_stats, activities, weather=weather, language=language)
             recommendation["source"] = "model"
             recommendation["model_attempt"] = attempt
+            recommendation["language"] = language
             _save_cached_recommendation(recommendation, user_id=user_id)
             return recommendation
         except Exception as exc:
@@ -705,6 +822,8 @@ def generate_coach_recommendation(
     recommendation["source"] = "local"
     if last_error is not None:
         recommendation["fallback_reason"] = f"Provider error after 3 attempts: {str(last_error)[:220]}"
+    recommendation = _apply_weather_context(recommendation, weather, language=language)
+    recommendation["language"] = language
     _save_cached_recommendation(recommendation, user_id=user_id)
     return recommendation
 
@@ -716,14 +835,17 @@ def get_coach_recommendation(
     refresh: bool = False,
     model_name: str = DEFAULT_GROQ_MODEL_NAME,
     user_id: str | None = None,
+    weather: dict[str, Any] | None = None,
+    language: str = "en",
 ) -> dict[str, Any]:
+    language = _normalize_language(language)
     if daily_stats is None or activities is None:
         loaded_stats, loaded_activities = load_coach_inputs()
         daily_stats = daily_stats or loaded_stats
         activities = activities or loaded_activities
 
     if not refresh:
-        cached_recommendation = _load_cached_recommendation(user_id=user_id)
+        cached_recommendation = _load_cached_recommendation(user_id=user_id, language=language)
         if cached_recommendation is not None:
             return cached_recommendation
 
@@ -732,11 +854,13 @@ def get_coach_recommendation(
         recommendation = _local_recommendation(profile, daily_stats, activities)
         recommendation["source"] = "local"
         recommendation["fallback_reason"] = "GROQ_CLOUD_KEY is missing or empty."
+        recommendation = _apply_weather_context(recommendation, weather, language=language)
+        recommendation["language"] = language
         _save_cached_recommendation(recommendation)
         return recommendation
 
     recommendation = generate_coach_recommendation(
-        profile, client, daily_stats, activities, refresh=refresh, user_id=user_id
+        profile, client, daily_stats, activities, refresh=refresh, user_id=user_id, weather=weather, language=language
     )
     _save_cached_recommendation(recommendation, user_id=user_id)
     return recommendation

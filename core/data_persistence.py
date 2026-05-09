@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
+import urllib.error
+import urllib.request
 
 
 def _ensure_data_dir() -> Path:
@@ -178,8 +181,61 @@ def save_garmin_credentials(credentials: dict[str, Any], user_id: str | None = N
     return filename
 
 
+def _vault_build_url(vault_addr: str, kv_path: str) -> str:
+    base = vault_addr.rstrip("/")
+    path = kv_path.lstrip("/")
+    if path.startswith("v1/"):
+        return f"{base}/{path}"
+    if "data/" not in path:
+        if "/" in path:
+            mount, rest = path.split("/", 1)
+            path = f"{mount}/data/{rest}"
+        else:
+            path = f"{path}/data"
+    return f"{base}/v1/{path}"
+
+
+def _load_garmin_credentials_from_vault(user_id: str | None = None) -> dict[str, Any] | None:
+    vault_addr = os.getenv("VAULT_ADDR", "").strip()
+    vault_token = os.getenv("VAULT_TOKEN", "").strip()
+    if not vault_addr or not vault_token:
+        return None
+
+    kv_path = os.getenv("VAULT_KV_PATH", "kv/garmin/default").strip()
+    if "{user_id}" in kv_path and user_id:
+        kv_path = kv_path.replace("{user_id}", _safe_user_segment(user_id))
+
+    url = _vault_build_url(vault_addr, kv_path)
+    request = urllib.request.Request(
+        url,
+        headers={"X-Vault-Token": vault_token},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+        return None
+
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    if isinstance(data, dict) and "data" in data:
+        data = data.get("data", {})
+    if not isinstance(data, dict):
+        return None
+
+    email = data.get("email") or data.get("GARMIN_EMAIL")
+    password = data.get("password") or data.get("GARMIN_PASSWORD")
+    if not email or not password:
+        return None
+    return {"email": str(email).strip(), "password": str(password).strip()}
+
+
 def load_garmin_credentials(user_id: str | None = None) -> dict[str, Any]:
     """Load stored Garmin login credentials for a specific user."""
+    vault_credentials = _load_garmin_credentials_from_vault(user_id=user_id)
+    if vault_credentials:
+        return vault_credentials
+
     filename = _resolve_file("garmin_credentials.json", user_id=user_id)
 
     if not filename.exists():
