@@ -91,7 +91,7 @@ def _due_times(now: datetime, times: list[str], last_run_map: dict[str, str]) ->
 def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
     if not FETCH_SCRIPT.exists():
         return False, "Garmin fetch script missing."
-    command = [sys.executable, str(FETCH_SCRIPT), "--user-id", str(user_id)]
+    command = [sys.executable, "-m", "core.fetch_garmin_data", "--user-id", str(user_id)]
     try:
         result = subprocess.run(command, capture_output=True, text=True, cwd=str(ROOT_DIR), check=False)
     except Exception as exc:
