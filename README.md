@@ -212,7 +212,7 @@ Then visit: `http://your-server-ip:8080`
 
 ## Systemd Service (Port 8080)
 
-A sample unit file is included as `personal-garmin-ai-coach.service`. Update paths if needed:
+A sample unit file is included as `PGAIC.service`. It matches the server layout used in production:
 
 ```
 [Unit]
@@ -224,7 +224,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/home/ubuntu/PersonalGarminAICoach
 EnvironmentFile=/home/ubuntu/PersonalGarminAICoach/.env
-ExecStart=/usr/bin/python3 -m streamlit run /home/ubuntu/PersonalGarminAICoach/web/app.py --server.port=8080 --server.address=0.0.0.0
+ExecStart=/home/ubuntu/PersonalGarminAICoach/.venv/bin/python -m streamlit run /home/ubuntu/PersonalGarminAICoach/web/app.py --server.port=8080 --server.address=0.0.0.0
 Restart=always
 RestartSec=20
 
@@ -232,13 +232,14 @@ RestartSec=20
 WantedBy=multi-user.target
 ```
 
-Enable the service:
+Enable the service and follow the logs:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable personal-garmin-ai-coach
-sudo systemctl start personal-garmin-ai-coach
-sudo systemctl status personal-garmin-ai-coach
+sudo systemctl enable PGAIC.service
+sudo systemctl start PGAIC.service
+sudo systemctl status PGAIC.service
+sudo journalctl -u PGAIC.service -f
 ```
 
 ## Data Files
