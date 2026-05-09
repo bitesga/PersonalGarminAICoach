@@ -109,9 +109,11 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
 
 def _invoke_get_coach_recommendation(profile: coach_agent.CoachProfile, daily_stats, activities, user_id: str) -> dict[str, Any]:
     func = coach_agent.get_coach_recommendation
+    profile_data = load_user_profile(user_id=user_id) or {}
+    language = str(profile_data.get("ui_language", "en")).strip().lower()
     try:
         sig = inspect.signature(func)
-        if "user_id" in sig.parameters and "weather" in sig.parameters:
+        if "user_id" in sig.parameters and "weather" in sig.parameters and "language" in sig.parameters:
             return func(
                 profile=profile,
                 daily_stats=daily_stats,
@@ -119,6 +121,16 @@ def _invoke_get_coach_recommendation(profile: coach_agent.CoachProfile, daily_st
                 refresh=True,
                 user_id=user_id,
                 weather=_get_weather_from_profile(user_id),
+                language=language,
+            )
+        if "user_id" in sig.parameters and "language" in sig.parameters:
+            return func(
+                profile=profile,
+                daily_stats=daily_stats,
+                activities=activities,
+                refresh=True,
+                user_id=user_id,
+                language=language,
             )
         if "weather" in sig.parameters:
             return func(
@@ -127,6 +139,14 @@ def _invoke_get_coach_recommendation(profile: coach_agent.CoachProfile, daily_st
                 activities=activities,
                 refresh=True,
                 weather=_get_weather_from_profile(user_id),
+            )
+        if "language" in sig.parameters:
+            return func(
+                profile=profile,
+                daily_stats=daily_stats,
+                activities=activities,
+                refresh=True,
+                language=language,
             )
         if "user_id" in sig.parameters:
             return func(profile=profile, daily_stats=daily_stats, activities=activities, refresh=True, user_id=user_id)

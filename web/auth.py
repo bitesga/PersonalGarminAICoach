@@ -297,7 +297,7 @@ def render_auth_gate() -> str:
                         else:
                             verifier = _resolve_verify_email_password()
                             if not verifier(email.strip().lower(), password):
-                                st.error("Passwort ist falsch.")
+                                st.error(tr("Password is incorrect.", "Passwort ist falsch."))
                             else:
                                 key = user_management._key_for_email(email.strip().lower())
                                 st.session_state.discord_verified = True
@@ -311,41 +311,47 @@ def render_auth_gate() -> str:
                                 st.rerun()
 
             with tab_register:
-                email_reg = st.text_input("Email for registration", value=st.session_state.get("temp_email", ""), key="reg_email_register_field")
-                password_reg = st.text_input("Password for new email sign-in", type="password", key="reg_password_register_field")
+                email_reg = st.text_input(tr("Email for registration", "E-Mail fuer die Registrierung"), value=st.session_state.get("temp_email", ""), key="reg_email_register_field")
+                password_reg = st.text_input(tr("Password for new email sign-in", "Passwort fuer neue E-Mail-Anmeldung"), type="password", key="reg_password_register_field")
                 st.session_state["temp_email"] = email_reg
 
-                if st.button("Register & send code by email", key="reg_email_send_btn"):
+                if st.button(tr("Register & send code by email", "Registrieren & Code per E-Mail senden"), key="reg_email_send_btn"):
                     if not email_reg:
-                        st.error("Please enter an email address.")
+                        st.error(tr("Please enter an email address.", "Bitte gib eine E-Mail-Adresse ein."))
                     else:
                         email_clean = email_reg.strip().lower()
                         existing_email_user = user_management.get_user_by_email(email_clean)
                         if existing_email_user and bool(existing_email_user.get("verified", False)):
-                            st.warning("This email is already registered and verified. Please use the sign-in tab.")
+                            st.warning(tr("This email is already registered and verified. Please use the sign-in tab.", "Diese E-Mail ist bereits registriert und verifiziert. Bitte nutze den Login-Tab."))
                         else:
                             user = user_management.register_email_user(email_clean, password=password_reg or None)
                             code = user.get("verification_code")
                             if not code:
-                                st.error("No verification code available. Please try again.")
+                                st.error(tr("No verification code available. Please try again.", "Kein Verifizierungscode verfuegbar. Bitte erneut versuchen."))
                             else:
-                                subject = "Your verification code for PersonalGarminAICoach"
-                                text = f"Your verification code: {code}\n\nEnter this code in the app form to verify your account."
-                                html = f"<p>Your verification code: <strong>{code}</strong></p>"
+                                subject = tr("Your verification code for PersonalGarminAICoach", "Dein Verifizierungscode fuer PersonalGarminAICoach")
+                                text = tr(
+                                    f"Your verification code: {code}\n\nEnter this code in the app form to verify your account.",
+                                    f"Dein Verifizierungscode: {code}\n\nGib diesen Code im App-Formular ein, um dein Konto zu verifizieren.",
+                                )
+                                html = tr(
+                                    f"<p>Your verification code: <strong>{code}</strong></p>",
+                                    f"<p>Dein Verifizierungscode: <strong>{code}</strong></p>",
+                                )
                                 sent, msg = send_email(subject=subject, body_text=text, body_html=html, recipient_email=email_clean)
                                 if sent:
-                                    st.success("Verification code sent by email. Please check your inbox.")
+                                    st.success(tr("Verification code sent by email. Please check your inbox.", "Verifizierungscode per E-Mail gesendet. Bitte Posteingang pruefen."))
                                     st.session_state["temp_code_sent"] = True
                                 else:
-                                    st.error(f"Email send failed: {msg}")
+                                    st.error(f"{tr('Email send failed', 'E-Mail-Senden fehlgeschlagen')}: {msg}")
 
-                entered = st.text_input("Verification code", value=st.session_state.get("temp_code_input", ""), key="reg_email_code_input_field")
+                entered = st.text_input(tr("Verification code", "Verifizierungscode"), value=st.session_state.get("temp_code_input", ""), key="reg_email_code_input_field")
                 st.session_state["temp_code_input"] = entered
-                if st.button("Verify code (email)", key="reg_email_verify_btn"):
+                if st.button(tr("Verify code (email)", "Code pruefen (E-Mail)"), key="reg_email_verify_btn"):
                     if not email_reg:
-                        st.error("Enter your email address first.")
+                        st.error(tr("Enter your email address first.", "Bitte zuerst deine E-Mail-Adresse eingeben."))
                     elif not entered:
-                        st.error("Please enter the code.")
+                        st.error(tr("Please enter the code.", "Bitte den Code eingeben."))
                     else:
                         ok = user_management.verify_email_user(email_reg.strip().lower(), str(entered).strip())
                         if ok:
@@ -357,11 +363,11 @@ def render_auth_gate() -> str:
                             profile["notify_email"] = True
                             save_user_profile(profile, user_id=key)
                             _persist_auth_session(key)
-                            st.success("Email verified - you are being redirected to the dashboard.")
+                            st.success(tr("Email verified - you are being redirected to the dashboard.", "E-Mail verifiziert - du wirst zum Dashboard weitergeleitet."))
                             st.balloons()
                             st.rerun()
                         else:
-                            st.error("Verification failed. The code is invalid or expired.")
+                            st.error(tr("Verification failed. The code is invalid or expired.", "Verifizierung fehlgeschlagen. Der Code ist ungueltig oder abgelaufen."))
 
         st.stop()
 

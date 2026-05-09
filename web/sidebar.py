@@ -217,6 +217,7 @@ def _save_profile_from_sidebar(user_id: str) -> dict[str, Any]:
         "email": st.session_state.email_config.strip(),
         "location_latitude": float(st.session_state.location_latitude_config),
         "location_longitude": float(st.session_state.location_longitude_config),
+        "ui_language": str(st.session_state.get("ui_language", "en")).strip().lower(),
         "auto_recommendation_enabled": bool(st.session_state.auto_reco_enabled_config),
         "auto_recommendation_times": times,
     })

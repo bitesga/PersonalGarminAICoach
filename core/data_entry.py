@@ -11,6 +11,13 @@ except ImportError:
     st = None
 
 
+def _tr(english: str, german: str) -> str:
+    if st is None:
+        return english
+    language = str(st.session_state.get("ui_language", "en")).strip().lower()
+    return german if language == "de" else english
+
+
 def render_garmin_credentials_section() -> dict[str, str] | None:
     """Render a Garmin login form with email and password.
 
@@ -19,38 +26,41 @@ def render_garmin_credentials_section() -> dict[str, str] | None:
     if st is None:
         return None
 
-    st.markdown("### Garmin Connect")
+    st.markdown(f"### {_tr('Garmin Connect', 'Garmin Connect')}")
     st.write(
-        "Sign in with your Garmin account to sync activities and fitness data automatically."
+        _tr(
+            "Sign in with your Garmin account to sync activities and fitness data automatically.",
+            "Melde dich mit deinem Garmin-Konto an, um Aktivitaeten und Fitnessdaten automatisch zu synchronisieren.",
+        )
     )
 
     col1, col2 = st.columns(2)
     with col1:
         email = st.text_input(
-            "Garmin email",
+            _tr("Garmin email", "Garmin E-Mail"),
             placeholder="your.name@example.com",
             key="garmin_email",
-            help="Email address for your Garmin account",
+            help=_tr("Email address for your Garmin account", "E-Mail-Adresse fuer dein Garmin-Konto"),
         )
 
     with col2:
         password = st.text_input(
-            "Garmin password",
+            _tr("Garmin password", "Garmin Passwort"),
             type="password",
             placeholder="••••••••",
             key="garmin_password",
-            help="Password for your Garmin account",
+            help=_tr("Password for your Garmin account", "Passwort fuer dein Garmin-Konto"),
         )
 
-    if st.button("✓ Connect Garmin account", key="connect_garmin_btn", use_container_width=True):
+    if st.button(_tr("✓ Connect Garmin account", "✓ Garmin-Konto verbinden"), key="connect_garmin_btn", use_container_width=True):
         if email and password:
-            st.success("Garmin account prepared successfully.")
+            st.success(_tr("Garmin account prepared successfully.", "Garmin-Konto erfolgreich vorbereitet."))
             return {"email": email.strip(), "password": password}
-        st.error("Please enter both email and password.")
+        st.error(_tr("Please enter both email and password.", "Bitte E-Mail und Passwort eingeben."))
         return None
 
     st.markdown(
-        "<span style='color:#94a3b8; font-size:0.85rem'>Note: The login data is stored locally for the active Discord user.</span>",
+        f"<span style='color:#94a3b8; font-size:0.85rem'>{_tr('Note: The login data is stored locally for the active Discord user.', 'Hinweis: Die Login-Daten werden lokal fuer den aktiven Discord-Nutzer gespeichert.')}</span>",
         unsafe_allow_html=True,
     )
     return None
@@ -61,7 +71,7 @@ def render_manual_health_entry() -> dict[str, Any]:
     if st is None:
         return {}
 
-    st.markdown("### Enter manual health data")
+    st.markdown(f"### {_tr('Enter manual health data', 'Manuelle Gesundheitsdaten eingeben')}")
 
     training_balance_options = [
         "N/A",
@@ -78,15 +88,15 @@ def render_manual_health_entry() -> dict[str, Any]:
     
     col1, col2 = st.columns(2)
     with col1:
-        sleep_score = st.slider("Sleep Score (0–100)", 0, 100, 75, key="manual_sleep_score")
-        body_battery = st.slider("Body Battery (0–100)", 0, 100, 70, key="manual_body_battery")
-        stress = st.slider("Stress (0–100)", 0, 100, 20, key="manual_stress")
+        sleep_score = st.slider(_tr("Sleep Score (0-100)", "Schlaf-Score (0-100)"), 0, 100, 75, key="manual_sleep_score")
+        body_battery = st.slider(_tr("Body Battery (0-100)", "Koerperbatterie (0-100)"), 0, 100, 70, key="manual_body_battery")
+        stress = st.slider(_tr("Stress (0-100)", "Stress (0-100)"), 0, 100, 20, key="manual_stress")
         vo2_max = st.slider("VO2Max (ml/kg/min)", 20.0, 110.0, 45.0, step=0.1, key="manual_vo2_max")
-        resting_hr = st.slider("Resting Heart Rate (bpm)", 0, 100, 60, step=1, key="manual_resting_hr")
+        resting_hr = st.slider(_tr("Resting Heart Rate (bpm)", "Ruhepuls (bpm)"), 0, 100, 60, step=1, key="manual_resting_hr")
     
     with col2:
         training_load_acute = st.number_input(
-            "Acute Training Load",
+            _tr("Acute Training Load", "Akute Trainingsbelastung"),
             0.0,
             1000.0,
             0.0,
@@ -94,19 +104,19 @@ def render_manual_health_entry() -> dict[str, Any]:
             key="manual_training_load_acute",
         )
         training_balance_feedback = st.selectbox(
-            "Training balance",
+            _tr("Training balance", "Trainingsbalance"),
             training_balance_options,
             index=0,
             key="manual_training_balance_feedback",
         )
         if training_balance_feedback == "OTHER":
             training_balance_feedback = st.text_input(
-                "Training balance (custom)",
-                placeholder="z. B. AEROBIC_HIGH_SHORTAGE",
+                _tr("Training balance (custom)", "Trainingsbalance (benutzerdefiniert)"),
+                placeholder=_tr("e.g. AEROBIC_HIGH_SHORTAGE", "z.B. AEROBIC_HIGH_SHORTAGE"),
                 key="manual_training_balance_feedback_other",
             ).strip() or "N/A"
-        date_input = st.date_input("Date", value=datetime.now(), key="manual_date")
-        time_input = st.time_input("Time", value=datetime.now().time(), key="manual_time")
+        date_input = st.date_input(_tr("Date", "Datum"), value=datetime.now(), key="manual_date")
+        time_input = st.time_input(_tr("Time", "Uhrzeit"), value=datetime.now().time(), key="manual_time")
     
     return {
         "date": str(date_input),
@@ -126,22 +136,22 @@ def render_manual_activity_entry() -> dict[str, Any] | None:
     if st is None:
         return None
 
-    st.markdown("### Add manual activity")
+    st.markdown(f"### {_tr('Add manual activity', 'Manuelle Aktivitaet hinzufuegen')}")
     
     col1, col2 = st.columns(2)
     with col1:
         activity_type = st.selectbox(
-            "Activity type",
+            _tr("Activity type", "Aktivitaetstyp"),
             ["running", "cycling", "strength_training", "swimming", "walking", "other"],
             key="manual_activity_type"
         )
-        duration_minutes = st.number_input("Duration (minutes)", 1, 300, 45, step=5, key="manual_duration")
-        distance_km = st.number_input("Distance (km, 0 if unknown)", 0.0, 100.0, 0.0, step=0.1, key="manual_distance")
+        duration_minutes = st.number_input(_tr("Duration (minutes)", "Dauer (Minuten)"), 1, 300, 45, step=5, key="manual_duration")
+        distance_km = st.number_input(_tr("Distance (km, 0 if unknown)", "Distanz (km, 0 wenn unbekannt)"), 0.0, 100.0, 0.0, step=0.1, key="manual_distance")
     
     with col2:
-        calories = st.number_input("Calories", 0, 2000, 300, step=10, key="manual_calories")
-        date_input = st.date_input("Activity date", value=datetime.now(), key="manual_activity_date")
-        time_input = st.time_input("Time", value=datetime.now().time(), key="manual_activity_time")
+        calories = st.number_input(_tr("Calories", "Kalorien"), 0, 2000, 300, step=10, key="manual_calories")
+        date_input = st.date_input(_tr("Activity date", "Aktivitaetsdatum"), value=datetime.now(), key="manual_activity_date")
+        time_input = st.time_input(_tr("Time", "Uhrzeit"), value=datetime.now().time(), key="manual_activity_time")
 
         # For strength training allow selecting the performed exercises instead of a numeric training effect
         if activity_type.lower().startswith("strength"):
@@ -200,11 +210,11 @@ def render_manual_activity_entry() -> dict[str, Any] | None:
                 "SLED_PUSH",
                 "SLED_PULL",
             ]
-            selected_exercises = st.multiselect("Exercises (strength)", exercises, key="manual_strength_exercises")
+            selected_exercises = st.multiselect(_tr("Exercises (strength)", "Uebungen (Krafttraining)"), exercises, key="manual_strength_exercises")
         else:
-            training_effect = st.slider("Training effect (Garmin scale 1-5)", 1.0, 5.0, 3.0, step=0.1, key="manual_training_effect")
+            training_effect = st.slider(_tr("Training effect (Garmin scale 1-5)", "Trainingseffekt (Garmin-Skala 1-5)"), 1.0, 5.0, 3.0, step=0.1, key="manual_training_effect")
     
-    if st.button("Save activity", key="save_manual_activity_btn"):
+    if st.button(_tr("Save activity", "Aktivitaet speichern"), key="save_manual_activity_btn"):
         # Combine date and time into single datetime string
         dt = datetime.combine(date_input, time_input)
         primary_metric = None

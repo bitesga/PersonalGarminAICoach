@@ -18,8 +18,26 @@ from typing import Any
 from dotenv import load_dotenv
 
 
-def _build_message(recommendation: dict[str, Any]) -> str:
-    title = str(recommendation.get("title") or "Coach Recommendation")
+def _normalize_language(language: str | None) -> str:
+    value = str(language or "en").strip().lower()
+    return "de" if value.startswith("de") else "en"
+
+
+def _tr(language: str, english: str, german: str) -> str:
+    return german if _normalize_language(language) == "de" else english
+
+
+def _get_notification_language(recommendation: dict[str, Any], profile: dict[str, Any] | None = None) -> str:
+    profile_lang = ""
+    if isinstance(profile, dict):
+        profile_lang = str(profile.get("ui_language", "")).strip().lower()
+    rec_lang = str(recommendation.get("language", "")).strip().lower()
+    return _normalize_language(profile_lang or rec_lang or "en")
+
+
+def _build_message(recommendation: dict[str, Any], language: str = "en") -> str:
+    language = _normalize_language(language)
+    title = str(recommendation.get("title") or _tr(language, "Coach Recommendation", "Coach-Empfehlung"))
     intensity = recommendation.get("intensity", "n/a")
     recommendation_text = str(recommendation.get("recommendation") or "")
     alternative_text = str(recommendation.get("alternative") or "").strip()
@@ -40,20 +58,20 @@ def _build_message(recommendation: dict[str, Any]) -> str:
         alternative_recommendation = alternative_text.strip().rstrip(".")
     else:
         main_recommendation = recommendation_text.strip()
-        alternative_recommendation = "No alternative provided."
+        alternative_recommendation = _tr(language, "No alternative provided.", "Keine Alternative angegeben.")
 
     body = (
-        f"GOOD MORNING!\n\n"
-        f"TODAY'S METRICS:\n"
-        f"SLEEP SCORE: {sleep_score}/100\n"
-        f"BODY BATTERY: {body_battery}/100\n"
-        f"STRESS: {stress}\n"
+        f"{_tr(language, 'GOOD MORNING!', 'GUTEN MORGEN!')}\n\n"
+        f"{_tr(language, "TODAY'S METRICS", 'HEUTIGE WERTE')}:\n"
+        f"{_tr(language, 'SLEEP SCORE', 'SCHLAF-SCORE')}: {sleep_score}/100\n"
+        f"{_tr(language, 'BODY BATTERY', 'KOERPERBATTERIE')}: {body_battery}/100\n"
+        f"{_tr(language, 'STRESS', 'STRESS')}: {stress}\n"
         f"VO2MAX: {vo2_max}\n"
         f"RHR: {resting_hr}\n\n"
-        f"MAIN RECOMMENDATION: {title}\n{main_recommendation}\n\n"
-        f"ALTERNATIVE:\n{alternative_recommendation}\n\n"
-        f"INTENSITY: {intensity}/10\n\n"
-        f"REASONING:\n{reasoning}\n"
+        f"{_tr(language, 'MAIN RECOMMENDATION', 'HAUPTEMPFEHLUNG')}: {title}\n{main_recommendation}\n\n"
+        f"{_tr(language, 'ALTERNATIVE', 'ALTERNATIVE')}:\n{alternative_recommendation}\n\n"
+        f"{_tr(language, 'INTENSITY', 'INTENSITAET')}: {intensity}/10\n\n"
+        f"{_tr(language, 'REASONING', 'BEGRUENDUNG')}:\n{reasoning}\n"
     )
     return body
 
@@ -131,17 +149,18 @@ def _clip(value: Any, max_len: int) -> str:
     return text[: max_len - 1] + "…"
 
 
-def _split_recommendation_text(recommendation_text: str) -> tuple[str, str]:
+def _split_recommendation_text(recommendation_text: str, language: str = "en") -> tuple[str, str]:
     if "Alternative:" in recommendation_text:
         main_recommendation, alternative_recommendation = recommendation_text.split("Alternative:", 1)
         main_recommendation = main_recommendation.strip().rstrip(".")
         alternative_recommendation = alternative_recommendation.strip().rstrip(".")
         return main_recommendation, alternative_recommendation
-    return recommendation_text.strip(), "No alternative provided."
+    return recommendation_text.strip(), _tr(language, "No alternative provided.", "Keine Alternative angegeben.")
 
 
-def _build_discord_recommendation_embed(recommendation: dict[str, Any]) -> dict[str, Any]:
-    title = _clip(recommendation.get("title") or "Coach Recommendation", 256)
+def _build_discord_recommendation_embed(recommendation: dict[str, Any], language: str = "en") -> dict[str, Any]:
+    language = _normalize_language(language)
+    title = _clip(recommendation.get("title") or _tr(language, "Coach Recommendation", "Coach-Empfehlung"), 256)
     intensity = _clip(recommendation.get("intensity") or "n/a", 32)
     recommendation_text = str(recommendation.get("recommendation") or "")
     alternative_text = str(recommendation.get("alternative") or "")
@@ -157,10 +176,10 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any]) -> dict[
     if alternative_text:
         main_reco, alt_reco = recommendation_text.strip(), alternative_text.strip()
     else:
-        main_reco, alt_reco = _split_recommendation_text(recommendation_text)
+        main_reco, alt_reco = _split_recommendation_text(recommendation_text, language=language)
 
     description = _clip(
-        f"**Main Recommendation**\n{main_reco}\n\n**Alternative**\n{alt_reco}",
+        f"**{_tr(language, 'Main Recommendation', 'Hauptempfehlung')}**\n{main_reco}\n\n**{_tr(language, 'Alternative', 'Alternative')}**\n{alt_reco}",
         4096,
     )
 
@@ -169,13 +188,13 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any]) -> dict[
         "description": description,
         "color": 0x38BDF8,
         "fields": [
-            {"name": "Sleep Score", "value": f"{sleep_score}/100", "inline": True},
-            {"name": "Body Battery", "value": f"{body_battery}/100", "inline": True},
-            {"name": "Stress", "value": f"{stress}", "inline": True},
+            {"name": _tr(language, "Sleep Score", "Schlaf-Score"), "value": f"{sleep_score}/100", "inline": True},
+            {"name": _tr(language, "Body Battery", "Koerperbatterie"), "value": f"{body_battery}/100", "inline": True},
+            {"name": _tr(language, "Stress", "Stress"), "value": f"{stress}", "inline": True},
             {"name": "VO2Max", "value": f"{vo2_max}", "inline": True},
             {"name": "RHR", "value": f"{resting_hr}", "inline": True},
-            {"name": "Intensity", "value": f"{intensity}/10", "inline": True},
-            {"name": "Reasoning", "value": reasoning or "-", "inline": False},
+            {"name": _tr(language, "Intensity", "Intensitaet"), "value": f"{intensity}/10", "inline": True},
+            {"name": _tr(language, "Reasoning", "Begruendung"), "value": reasoning or "-", "inline": False},
         ],
         "footer": {"text": "Garmin + AI · PersonalGarminAICoach"},
         "timestamp": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
@@ -231,9 +250,9 @@ def send_discord_dm_embed(
         return False, f"Discord send failed: {exc}"
 
 
-def send_discord_recommendation(recommendation: dict[str, Any], user_id: str, fallback_text: str) -> tuple[bool, str]:
+def send_discord_recommendation(recommendation: dict[str, Any], user_id: str, fallback_text: str, language: str = "en") -> tuple[bool, str]:
     """Send a daily recommendation as a Discord embed, with plain-text fallback."""
-    embed = _build_discord_recommendation_embed(recommendation)
+    embed = _build_discord_recommendation_embed(recommendation, language=language)
     ok, msg = send_discord_dm_embed(user_id=user_id, embed=embed)
     if ok:
         return True, msg
@@ -260,9 +279,10 @@ def send_verification_dm(user_id: str, code: str, invite_link: str | None = None
         return False, f"Error sending verification code: {exc}"
 
 
-def _build_message_html(recommendation: dict[str, Any]) -> str:
+def _build_message_html(recommendation: dict[str, Any], language: str = "en") -> str:
     """Build an HTML-formatted recommendation message."""
-    title = str(recommendation.get("title") or "Coach Recommendation")
+    language = _normalize_language(language)
+    title = str(recommendation.get("title") or _tr(language, "Coach Recommendation", "Coach-Empfehlung"))
     intensity = recommendation.get("intensity", "n/a")
     recommendation_text = str(recommendation.get("recommendation") or "")
     alternative_text = str(recommendation.get("alternative") or "").strip()
@@ -283,7 +303,7 @@ def _build_message_html(recommendation: dict[str, Any]) -> str:
         alternative_recommendation = alternative_text.strip().rstrip(".")
     else:
         main_recommendation = recommendation_text.strip()
-        alternative_recommendation = "No alternative provided."
+        alternative_recommendation = _tr(language, "No alternative provided.", "Keine Alternative angegeben.")
 
     html_body = f"""
     <html>
@@ -294,19 +314,19 @@ def _build_message_html(recommendation: dict[str, Any]) -> str:
         <h1 style="color: #38bdf8; text-align: center;">PersonalGarminAICoach</h1>
         
         <div style="background-color: #f0f9ff; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <h2 style="color: #38bdf8; margin-top: 0;">Good morning! 🏃</h2>
-            <p style="margin: 10px 0;"><strong>Today's metrics:</strong></p>
+            <h2 style="color: #38bdf8; margin-top: 0;">{_tr(language, 'Good morning! 🏃', 'Guten Morgen! 🏃')}</h2>
+            <p style="margin: 10px 0;"><strong>{_tr(language, "Today's metrics", 'Heutige Werte')}:</strong></p>
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #ccc;"><strong>Sleep Score:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ccc;"><strong>{_tr(language, 'Sleep Score', 'Schlaf-Score')}:</strong></td>
                     <td style="padding: 8px; border-bottom: 1px solid #ccc; color: #16a34a; font-weight: bold;">{sleep_score}/100</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #ccc;"><strong>Body Battery:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ccc;"><strong>{_tr(language, 'Body Battery', 'Koerperbatterie')}:</strong></td>
                     <td style="padding: 8px; border-bottom: 1px solid #ccc; color: #16a34a; font-weight: bold;">{body_battery}/100</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px; border-bottom: 1px solid #ccc;"><strong>Stress:</strong></td>
+                    <td style="padding: 8px; border-bottom: 1px solid #ccc;"><strong>{_tr(language, 'Stress', 'Stress')}:</strong></td>
                     <td style="padding: 8px; border-bottom: 1px solid #ccc; color: #16a34a; font-weight: bold;">{stress}</td>
                 </tr>
                 <tr>
@@ -314,26 +334,26 @@ def _build_message_html(recommendation: dict[str, Any]) -> str:
                     <td style="padding: 8px; border-bottom: 1px solid #ccc; color: #16a34a; font-weight: bold;">{vo2_max}</td>
                 </tr>
                 <tr>
-                    <td style="padding: 8px;"><strong>Resting HR:</strong></td>
+                    <td style="padding: 8px;"><strong>{_tr(language, 'Resting HR', 'Ruhepuls')}:</strong></td>
                     <td style="padding: 8px; color: #16a34a; font-weight: bold;">{resting_hr}</td>
                 </tr>
             </table>
         </div>
 
         <div style="background-color: #f5f3ff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #a78bfa;">
-            <h2 style="color: #7c3aed; margin-top: 0;">Main Recommendation: {title}</h2>
+            <h2 style="color: #7c3aed; margin-top: 0;">{_tr(language, 'Main Recommendation', 'Hauptempfehlung')}: {title}</h2>
             <p>{main_recommendation}</p>
         </div>
 
         <div style="background-color: #fef3c7; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #fbbf24;">
-            <h3 style="color: #d97706; margin-top: 0;">Alternative:</h3>
+            <h3 style="color: #d97706; margin-top: 0;">{_tr(language, 'Alternative', 'Alternative')}:</h3>
             <p>{alternative_recommendation}</p>
         </div>
 
         <div style="background-color: #ecfdf5; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-            <p><strong>Intensity:</strong> <span style="color: #059669; font-size: 1.2em; font-weight: bold;">{intensity}/10</span></p>
+            <p><strong>{_tr(language, 'Intensity', 'Intensitaet')}:</strong> <span style="color: #059669; font-size: 1.2em; font-weight: bold;">{intensity}/10</span></p>
             <hr style="border: none; border-top: 1px solid #d1fae5; margin: 15px 0;">
-            <p><strong>Reasoning:</strong></p>
+            <p><strong>{_tr(language, 'Reasoning', 'Begruendung')}:</strong></p>
             <p style="color: #666; font-style: italic;">{reasoning}</p>
         </div>
 
@@ -424,6 +444,8 @@ def notify_recommendation(
         result["skipped"].append("No new model recommendation; nothing sent.")
         return result
 
+    language = _get_notification_language(recommendation, profile)
+
     enriched_recommendation = dict(recommendation)
     latest_day = {}
     if isinstance(daily_stats, dict) and daily_stats:
@@ -431,8 +453,8 @@ def notify_recommendation(
         latest_day = daily_stats.get(latest_key, {}) if isinstance(daily_stats.get(latest_key, {}), dict) else {}
     enriched_recommendation["latest_day"] = latest_day
 
-    body_text = _build_message(enriched_recommendation)
-    body_html = _build_message_html(enriched_recommendation)
+    body_text = _build_message(enriched_recommendation, language=language)
+    body_html = _build_message_html(enriched_recommendation, language=language)
     discord_enabled = bool(profile.get("notify_discord", False))
     email_enabled = bool(profile.get("notify_email", False))
     email_address = _resolve_email_recipient(profile)
@@ -441,7 +463,7 @@ def notify_recommendation(
     # Send Discord notification
     if discord_enabled:
         if discord_user_id:
-            success, msg = send_discord_recommendation(enriched_recommendation, discord_user_id, fallback_text=body_text)
+            success, msg = send_discord_recommendation(enriched_recommendation, discord_user_id, fallback_text=body_text, language=language)
             (result["sent"] if success else result["errors"]).append(msg)
         else:
             result["errors"].append("Discord notifications are enabled, but no Discord ID is saved.")
@@ -451,7 +473,7 @@ def notify_recommendation(
     # Send Email notification
     if email_enabled and email_address:
         success, msg = send_email(
-            subject="PersonalGarminAICoach - Daily training recommendation",
+            subject=_tr(language, "PersonalGarminAICoach - Daily training recommendation", "PersonalGarminAICoach - Taegliche Trainingsempfehlung"),
             body_text=body_text,
             body_html=body_html,
             recipient_email=email_address,

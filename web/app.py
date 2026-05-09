@@ -418,9 +418,10 @@ def _invoke_get_coach_recommendation(profile, daily_stats, activities, refresh: 
     import inspect
 
     func = coach_agent.get_coach_recommendation
+    language = str(st.session_state.get("ui_language", "en")).strip().lower()
     try:
         sig = inspect.signature(func)
-        if "user_id" in sig.parameters and "weather" in sig.parameters:
+        if "user_id" in sig.parameters and "weather" in sig.parameters and "language" in sig.parameters:
             return func(
                 profile=profile,
                 daily_stats=daily_stats,
@@ -428,6 +429,16 @@ def _invoke_get_coach_recommendation(profile, daily_stats, activities, refresh: 
                 refresh=refresh,
                 user_id=user_id,
                 weather=st.session_state.get("current_weather"),
+                language=language,
+            )
+        if "user_id" in sig.parameters and "language" in sig.parameters:
+            return func(
+                profile=profile,
+                daily_stats=daily_stats,
+                activities=activities,
+                refresh=refresh,
+                user_id=user_id,
+                language=language,
             )
         if "weather" in sig.parameters:
             return func(
@@ -436,6 +447,14 @@ def _invoke_get_coach_recommendation(profile, daily_stats, activities, refresh: 
                 activities=activities,
                 refresh=refresh,
                 weather=st.session_state.get("current_weather"),
+            )
+        if "language" in sig.parameters:
+            return func(
+                profile=profile,
+                daily_stats=daily_stats,
+                activities=activities,
+                refresh=refresh,
+                language=language,
             )
         if "user_id" in sig.parameters:
             return func(profile=profile, daily_stats=daily_stats, activities=activities, refresh=refresh, user_id=user_id)
@@ -860,10 +879,10 @@ def _render_summary_cards(daily_stats: dict[str, Any], activities: list[dict[str
 
 def _render_weather_status(weather: dict[str, Any] | None, latitude: float, longitude: float) -> None:
     st.markdown("<div class='card-soft'>", unsafe_allow_html=True)
-    st.markdown("<div class='small-label'>Weather Status</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='small-label'>{tr('Weather Status', 'Wetterstatus')}</div>", unsafe_allow_html=True)
     if not weather:
         st.markdown(
-            f"<div class='metric-note'>Weather unavailable for {latitude:.4f}, {longitude:.4f}.</div>",
+            f"<div class='metric-note'>{tr('Weather unavailable for', 'Wetterdaten nicht verfuegbar fuer')} {latitude:.4f}, {longitude:.4f}.</div>",
             unsafe_allow_html=True,
         )
         st.markdown("</div>", unsafe_allow_html=True)
@@ -880,18 +899,18 @@ def _render_weather_status(weather: dict[str, Any] | None, latitude: float, long
 
     st.markdown(
         f"<div style='font-size:1.05rem; font-weight:600;'>"
-        f"{temp_text} · Wind {wind_text} · Precip {precip_text}"
+        f"{temp_text} · {tr('Wind', 'Wind')} {wind_text} · {tr('Precip', 'Niederschlag')} {precip_text}"
         f"</div>",
         unsafe_allow_html=True,
     )
     if time_value:
         st.markdown(
-            f"<div class='metric-note'>Last update: {time_value}</div>",
+            f"<div class='metric-note'>{tr('Last update', 'Letztes Update')}: {time_value}</div>",
             unsafe_allow_html=True,
         )
     if source:
         st.markdown(
-            f"<div class='metric-note'>Source: {source} · Location: {latitude:.4f}, {longitude:.4f}</div>",
+            f"<div class='metric-note'>{tr('Source', 'Quelle')}: {source} · {tr('Location', 'Standort')}: {latitude:.4f}, {longitude:.4f}</div>",
             unsafe_allow_html=True,
         )
     st.markdown("</div>", unsafe_allow_html=True)
@@ -940,48 +959,54 @@ def _render_metric_history_tabs(daily_stats: dict[str, Any]) -> None:
     latest = _latest_day(daily_stats)
     training_balance_feedback = str(latest.get("training_balance_feedback", "N/A")).strip()
 
-    tabs = st.tabs(["Sleep Score", "VO2Max", "Stress", "Training Load", "RHR"])
+    tabs = st.tabs([
+        tr("Sleep Score", "Schlaf-Score"),
+        "VO2Max",
+        tr("Stress", "Stress"),
+        tr("Training Load", "Trainingsbelastung"),
+        "RHR",
+    ])
 
     with tabs[0]:
         series = _series_for("sleep_score")
         if series:
             _render_chart(series)
         else:
-            st.info("No sleep score history available.")
+            st.info(tr("No sleep score history available.", "Kein Schlaf-Score-Verlauf verfuegbar."))
 
     with tabs[1]:
         series = _series_for("vo2_max")
         if series:
             _render_chart(series)
         else:
-            st.info("No VO2Max history available.")
+            st.info(tr("No VO2Max history available.", "Kein VO2Max-Verlauf verfuegbar."))
 
     with tabs[2]:
         series = _series_for("stress")
         if series:
             _render_chart(series)
         else:
-            st.info("No stress history available.")
+            st.info(tr("No stress history available.", "Kein Stress-Verlauf verfuegbar."))
 
     with tabs[3]:
         series = _series_for("training_load_acute")
         if series:
             _render_chart(series)
         else:
-            st.info("No training load history available.")
+            st.info(tr("No training load history available.", "Kein Trainingsbelastungs-Verlauf verfuegbar."))
 
     with tabs[4]:
         series = _series_for("resting_heart_rate")
         if series:
             _render_chart(series)
         else:
-            st.info("No resting heart rate history available.")
+            st.info(tr("No resting heart rate history available.", "Kein Ruhepuls-Verlauf verfuegbar."))
 
     if training_balance_feedback and training_balance_feedback != "N/A":
         st.markdown(
             f"""
             <div style='margin-top:0.45rem; padding:0.35rem 0.65rem; border-radius:999px; display:inline-block; background:rgba(56, 189, 248, 0.12); border:1px solid rgba(56, 189, 248, 0.24); color:#e2e8f0; font-size:0.98rem; font-weight:800; letter-spacing:0.02em;'>
-                Training Load Balance: {training_balance_feedback}
+                {tr('Training Load Balance', 'Trainingsbelastungs-Balance')}: {training_balance_feedback}
             </div>
             """,
             unsafe_allow_html=True,
@@ -990,12 +1015,12 @@ def _render_metric_history_tabs(daily_stats: dict[str, Any]) -> None:
 
 
 def _render_activities(activities: list[dict[str, Any]]) -> None:
-    st.markdown("<h3 class='section-title'>Recent Activities</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 class='section-title'>{tr('Recent Activities', 'Letzte Aktivitaeten')}</h3>", unsafe_allow_html=True)
     last_fetch = _get_last_fetch_timestamp()
-    st.caption(f"Last updated: {last_fetch}")
+    st.caption(f"{tr('Last updated', 'Zuletzt aktualisiert')}: {last_fetch}")
     
     if not activities:
-        st.info("No activities found.")
+        st.info(tr("No activities found.", "Keine Aktivitaeten gefunden."))
         return
 
     rows = []
@@ -1013,15 +1038,15 @@ def _render_activities(activities: list[dict[str, Any]]) -> None:
 
         rows.append(
             {
-                "Date": display_date,
-                "Type": activity.get("activity_type", "n/a"),
-                "Training Effect": _format_training_effect(
+                tr("Date", "Datum"): display_date,
+                tr("Type", "Typ"): activity.get("activity_type", "n/a"),
+                tr("Training Effect", "Trainingseffekt"): _format_training_effect(
                     activity.get("activity_type", ""),
                     activity.get("primary_metric", "n/a")
                 ),
-                "Duration": _format_duration(activity.get("duration", "n/a")),
-                "Calories": f"{activity.get('calories', 'n/a'):.0f}" if isinstance(activity.get('calories'), (int, float)) else "n/a",
-                "Distance": _format_distance(activity.get("distance", "n/a")) if activity.get("distance") else "—",
+                tr("Duration", "Dauer"): _format_duration(activity.get("duration", "n/a")),
+                tr("Calories", "Kalorien"): f"{activity.get('calories', 'n/a'):.0f}" if isinstance(activity.get('calories'), (int, float)) else "n/a",
+                tr("Distance", "Distanz"): _format_distance(activity.get("distance", "n/a")) if activity.get("distance") else "—",
             }
         )
     st.dataframe(rows, use_container_width=True, hide_index=True)
@@ -1029,7 +1054,7 @@ def _render_activities(activities: list[dict[str, Any]]) -> None:
 
 def _render_recommendation(recommendation: dict[str, Any]) -> None:
     st.markdown(f"<h3 class='section-title'>{tr('Next Training Recommendation', 'Naechste Trainingsempfehlung')}</h3>", unsafe_allow_html=True)
-    title = recommendation.get("title") or "Recommendation"
+    title = recommendation.get("title") or tr("Recommendation", "Empfehlung")
     recommendation_text = recommendation.get("recommendation") or "n/a"
     alternative_text = recommendation.get("alternative") or ""
     intensity = recommendation.get("intensity", "n/a")
@@ -1067,10 +1092,10 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
     if credentials is not None:
         try:
             save_garmin_credentials(credentials, user_id=user_id)
-            _set_flash_message("Garmin account connected and saved.")
+            _set_flash_message(tr("Garmin account connected and saved.", "Garmin-Konto verbunden und gespeichert."))
             st.rerun()
         except Exception as exc:
-            st.error(f"Failed to save Garmin credentials: {exc}")
+            st.error(f"{tr('Failed to save Garmin credentials', 'Fehler beim Speichern der Garmin-Zugangsdaten')}: {exc}")
     st.markdown("---")
     
     # Manual health entry
@@ -1079,7 +1104,7 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
     
     with tab_health:
         health_data = data_entry.render_manual_health_entry()
-        if st.button("Save health metrics", key="save_health_btn"):
+        if st.button(tr("Save health metrics", "Gesundheitswerte speichern"), key="save_health_btn"):
             try:
                 # Convert date to dict key format
                 date_key = health_data.get("date", "")
@@ -1087,10 +1112,10 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
                 health_entry["source"] = "manual"
                 health_dict = {date_key: health_entry}
                 save_daily_stats(health_dict, user_id=user_id)
-                _set_flash_message(f"Health metrics saved for {date_key}.")
+                _set_flash_message(f"{tr('Health metrics saved for', 'Gesundheitswerte gespeichert fuer')} {date_key}.")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Failed to save: {exc}")
+                st.error(f"{tr('Failed to save', 'Speichern fehlgeschlagen')}: {exc}")
     
     with tab_activity:
         activity_data = data_entry.render_manual_activity_entry()
@@ -1103,10 +1128,10 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
                 activity_data.setdefault("id", f"manual-{datetime.now().isoformat(timespec='seconds')}")
                 current_activities.insert(0, activity_data)
                 save_activities(current_activities, user_id=user_id)
-                _set_flash_message(f"Activity ({activity_data.get('activity_type')}) saved.")
+                _set_flash_message(f"{tr('Activity saved', 'Aktivitaet gespeichert')}: {activity_data.get('activity_type')}")
                 st.rerun()
             except Exception as exc:
-                st.error(f"Failed to save: {exc}")
+                st.error(f"{tr('Failed to save', 'Speichern fehlgeschlagen')}: {exc}")
 
     st.markdown("---")
     st.markdown(f"### {tr('Delete manual entries', 'Manuelle Eintraege loeschen')}")
@@ -1137,7 +1162,7 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
             selected_health_date = manual_health_entries[selected_health_index][0]
             if st.button(tr("Delete health metrics", "Gesundheitswerte loeschen"), key="delete_health_btn"):
                 delete_daily_stat(selected_health_date, user_id=user_id)
-                _set_flash_message(f"Health metrics deleted for {selected_health_date}.")
+                _set_flash_message(f"{tr('Health metrics deleted for', 'Gesundheitswerte geloescht fuer')} {selected_health_date}.")
                 st.rerun()
         else:
             st.info(tr("No manual health metrics available.", "Keine manuellen Gesundheitswerte vorhanden."))
@@ -1154,7 +1179,7 @@ def _render_data_sources_tab(profile: dict[str, Any], user_id: str) -> None:
             selected_activity_id = str(manual_activity_entries[selected_activity_index].get("id", ""))
             if st.button(tr("Delete activity", "Aktivitaet loeschen"), key="delete_activity_btn"):
                 delete_activity(selected_activity_id, user_id=user_id)
-                _set_flash_message(f"Activity {selected_activity_label} deleted.")
+                _set_flash_message(f"{tr('Activity deleted', 'Aktivitaet geloescht')}: {selected_activity_label}")
                 st.rerun()
         else:
             st.info(tr("No manual activities available.", "Keine manuellen Aktivitaeten vorhanden."))
@@ -1241,7 +1266,7 @@ def main() -> None:
 
     if os.getenv("VAULT_ADDR", "").strip() and os.getenv("VAULT_TOKEN", "").strip():
         if not st.session_state.get("vault_notice_shown"):
-            st.toast("Secure Vault OSS is enabled for credential storage.", icon="✅")
+            st.toast(tr("Secure Vault OSS is enabled for credential storage.", "Sicherer Vault OSS ist fuer die Zugangsdaten aktiv."), icon="✅")
             st.session_state.vault_notice_shown = True
 
     if "current_weather" not in st.session_state:
@@ -1267,9 +1292,9 @@ def main() -> None:
         notify_on_refresh = bool(st.session_state.pop("trigger_notification_on_refresh", False))
 
         if refresh:
-            _set_coach_status(["Querying AI..."], "info")
+            _set_coach_status([tr("Querying AI...", "KI wird abgefragt...")], "info")
             _render_coach_status(status_box)
-            with st.spinner("Re-querying AI..."):
+            with st.spinner(tr("Re-querying AI...", "KI wird erneut abgefragt...")):
                 recommendation = _invoke_get_coach_recommendation(
                     profile=coach_profile,
                     daily_stats=daily_stats,
@@ -1277,7 +1302,7 @@ def main() -> None:
                     refresh=True,
                     user_id=active_user_id,
                 )
-            _set_coach_status(["Loading AI response into the dashboard."], "info")
+            _set_coach_status([tr("Loading AI response into the dashboard.", "KI-Antwort wird ins Dashboard geladen.")], "info")
             _render_coach_status(status_box)
         else:
             recommendation = _invoke_get_coach_recommendation(
@@ -1289,7 +1314,7 @@ def main() -> None:
             )
 
         if notify_on_refresh:
-            _set_coach_status(["Sending notification..."], "info")
+            _set_coach_status([tr("Sending notification...", "Benachrichtigung wird gesendet...")], "info")
             _render_coach_status(status_box)
             try:
                 notify_result = notify_recommendation(recommendation, profile, daily_stats=daily_stats)
@@ -1297,27 +1322,27 @@ def main() -> None:
                 notify_result = notify_recommendation(recommendation, profile)
             if notify_result["sent"]:
                 st.success(" | ".join(notify_result["sent"]))
-                _set_coach_status(["Sent: " + " | ".join(notify_result["sent"])], "success")
+                _set_coach_status([tr("Sent", "Gesendet") + ": " + " | ".join(notify_result["sent"])], "success")
             for error in notify_result["errors"]:
                 st.error(error)
-                _set_coach_status(["Error: " + error], "error")
+                _set_coach_status([tr("Error", "Fehler") + ": " + error], "error")
 
             if not notify_result["sent"] and not notify_result["errors"]:
                 skipped = notify_result.get("skipped", [])
                 if skipped:
-                    _set_coach_status(["Note: " + skipped[0]], "info")
+                    _set_coach_status([tr("Note", "Hinweis") + ": " + skipped[0]], "info")
 
             if recommendation.get("source") == "local":
                 reason = str(recommendation.get("fallback_reason", "LLM unavailable or API key missing.")).strip()
-                _set_coach_status([f"Local fallback active: {reason}"], "error")
+                _set_coach_status([f"{tr('Local fallback active', 'Lokaler Fallback aktiv')}: {reason}"], "error")
 
             _render_coach_status(status_box)
         elif refresh:
             if recommendation.get("source") == "local":
                 reason = str(recommendation.get("fallback_reason", "LLM unavailable or API key missing.")).strip()
-                _set_coach_status([f"Local fallback active: {reason}"], "error")
+                _set_coach_status([f"{tr('Local fallback active', 'Lokaler Fallback aktiv')}: {reason}"], "error")
             else:
-                _set_coach_status(["Refresh complete."], "success")
+                _set_coach_status([tr("Refresh complete.", "Aktualisierung abgeschlossen.")], "success")
             _render_coach_status(status_box)
 
         hero_text = tr(
