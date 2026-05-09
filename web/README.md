@@ -28,6 +28,7 @@ streamlit run web/app.py
 
 - Sidebar configuration
   - Mobility and goal selection
+  - City search to auto-fill weather location coordinates
   - Coach refresh actions
   - Automatic recommendation times
   - Notification settings
@@ -50,7 +51,7 @@ The dashboard reads all configuration from `.env` in the repo root. Key values:
 - `GARMIN_EMAIL` / `GARMIN_PASSWORD`
 - `DISCORD_BOT_TOKEN`
 - `MAIL_USERNAME` / `MAIL_PASSWORD`
-- `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_KV_PATH` for optional Vault credential storage
+- `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_KV_PATH` for Vault credential storage
 
 ## Data Files
 

@@ -100,7 +100,7 @@ VAULT_KV_PATH=kv/garmin/default
   - Mobility selection
   - Training goal selection
   - Additional notes for the coach
-  - Location (latitude/longitude) for weather-aware advice
+  - Location via city search (auto-fills latitude/longitude) for weather-aware advice
   - Language switch for English or German
 
 - Coach
@@ -118,7 +118,7 @@ VAULT_KV_PATH=kv/garmin/default
   - Email notifications (HTML)
 
 - Data Sources
-  - Garmin credentials (saved locally and, if Vault is configured, also written to Vault on connect)
+  - Garmin credentials (stored in Vault on connect)
   - Manual health metrics input
   - Manual activity input
   - Manual weather testing values for recommendation checks
@@ -168,7 +168,8 @@ The coach is designed to be concrete and safe:
 
 The coach can adjust recommendations based on current weather using Open-Meteo.
 
-- Location is configured in the sidebar (latitude/longitude) and saved per user.
+- Location is configured in the sidebar via city search (Open-Meteo Geocoding API) and saved per user.
+- The selected city writes latitude/longitude automatically; manual coordinate input remains available as fallback.
 - Weather is fetched every 10 minutes while the dashboard is open.
 - The main recommendation is outdoor only when temperature is between 5°C and 35°C and precipitation is at most 20 mm.
 - Otherwise the main recommendation is indoor.
