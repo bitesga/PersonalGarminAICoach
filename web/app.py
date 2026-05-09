@@ -414,6 +414,8 @@ def _reload_garmin_data(user_id: str) -> tuple[bool, str]:
     combined_output = "\n\n".join(output_parts) if output_parts else "Garmin data was refreshed."
     if "using cache" in combined_output.lower() or "completed (using cache)" in combined_output.lower():
         combined_output = "[CACHE_USED]\n" + combined_output
+    if "AUTH_ERROR:" in combined_output:
+        combined_output = "[AUTH_ERROR]\n" + combined_output
     return result.returncode == 0, combined_output
 
 
@@ -526,6 +528,7 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
             _set_coach_status(["Refreshing Garmin data..."], "info")
             with st.spinner("Refreshing Garmin data..."):
                 success, message = _reload_garmin_data(user_id)
+            auth_error = message.startswith("[AUTH_ERROR]")
             if success:
                 cache_used = message.startswith("[CACHE_USED]")
                 if cache_used:
@@ -542,8 +545,13 @@ def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
                     "info",
                 )
             else:
-                st.error("Garmin data could not be refreshed.")
-                _set_coach_status(["Garmin refresh failed.", message], "error")
+                if auth_error:
+                    message = message.removeprefix("[AUTH_ERROR]\n")
+                    st.error("Garmin login failed. Please check your email and password.")
+                    _set_coach_status(["Garmin login failed.", message], "error")
+                else:
+                    st.error("Garmin data could not be refreshed.")
+                    _set_coach_status(["Garmin refresh failed.", message], "error")
             with st.expander("Reload output", expanded=not success):
                 st.code(message, language="text")
             st.session_state.refresh_recommendation = True

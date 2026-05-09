@@ -40,6 +40,25 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _is_authentication_error_message(message: str) -> bool:
+    lowered = message.lower()
+    return any(
+        marker in lowered
+        for marker in (
+            "authentication",
+            "auth error",
+            "login failed",
+            "invalid credential",
+            "invalid password",
+            "incorrect password",
+            "unauthorized",
+            "permission denied",
+            "401",
+            "403",
+        )
+    )
+
+
 def _calculate_next_retry_time(retry_count: int) -> datetime:
     """Calculate next retry time with exponential backoff.
     
@@ -459,6 +478,9 @@ def main() -> int:
         return 1
     except GarminConnectConnectionError as e:
         error_msg = str(e)
+        if _is_authentication_error_message(error_msg):
+            logger.error(f"AUTH_ERROR: Garmin login failed. Please check your email/password. {e}")
+            return 1
         if "429" in error_msg or "rate limit" in error_msg.lower():
             logger.error(f"Rate limit error from Garmin: {e}")
             _record_garmin_failure("rate_limit_429", user_id=user_id)
