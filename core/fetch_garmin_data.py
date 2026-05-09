@@ -386,6 +386,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Fetch Garmin data for a specific user.")
     parser.add_argument("--user-id", dest="user_id", default="", help="Discord user ID for scoped storage")
     parser.add_argument("--debug", dest="debug", action="store_true", help="Enable debug logging")
+    parser.add_argument("--force", dest="force", action="store_true", help="Ignore retry backoff and fetch Garmin data anyway")
     return parser.parse_args()
 
 
@@ -424,7 +425,9 @@ def main() -> int:
         return 1
 
     # ===== Check if we should attempt Garmin fetch or use cached data =====
-    should_attempt, retry_state = _should_attempt_garmin_fetch(user_id=user_id)
+    should_attempt, retry_state = _should_attempt_garmin_fetch(user_id=user_id) if not args.force else (True, {})
+    if args.force:
+        logger.warning("Force mode enabled. Ignoring retry backoff and attempting Garmin fetch now.")
     
     if not should_attempt:
         logger.warning("Skipping Garmin fetch due to rate-limit backoff. Using cached data.")
