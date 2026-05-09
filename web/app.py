@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import altair as alt
+import logging
 import os
 import random
 import secrets
@@ -20,6 +21,19 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 if str(CORE_DIR) not in sys.path:
     sys.path.insert(0, str(CORE_DIR))
+
+# Configure logging to stderr for systemd journalctl visibility
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stderr),
+    ],
+    force=True,  # Override any existing handlers
+)
+
+logger = logging.getLogger(__name__)
+logger.info("App starting up")
 
 from core.weather_service import fetch_current_weather
 from core import coach_agent

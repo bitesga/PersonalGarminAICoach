@@ -173,7 +173,7 @@ def load_user_profile(user_id: str | None = None) -> dict[str, Any]:
 def save_garmin_credentials(credentials: dict[str, Any], user_id: str | None = None) -> Path:
     """Save Garmin login credentials for a specific user.
 
-    Credentials are stored locally in the user's data folder.
+    Credentials are stored locally in JSON and optionally in Vault.
     """
     filename = _resolve_file("garmin_credentials.json", user_id=user_id)
     output = {
@@ -181,7 +181,61 @@ def save_garmin_credentials(credentials: dict[str, Any], user_id: str | None = N
         "credentials": credentials,
     }
     filename.write_text(json.dumps(output, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    logger.info(f"Credentials saved to JSON: {filename}")
+    
+    # Try to save to Vault as well (non-blocking)
+    _save_garmin_credentials_to_vault(credentials, user_id=user_id)
+    
     return filename
+
+
+def _save_garmin_credentials_to_vault(credentials: dict[str, Any], user_id: str | None = None) -> bool:
+    """Save Garmin credentials to Vault KV store.
+    
+    Returns True if successful, False otherwise.
+    Does not raise exceptions—logs and continues on failure.
+    """
+    vault_addr = os.getenv("VAULT_ADDR", "").strip()
+    vault_token = os.getenv("VAULT_TOKEN", "").strip()
+    if not vault_addr or not vault_token:
+        logger.debug("Vault write skipped: VAULT_ADDR or VAULT_TOKEN not set")
+        return False
+
+    kv_path = os.getenv("VAULT_KV_PATH", "kv/garmin/default").strip()
+    original_path = kv_path
+    if "{user_id}" in kv_path and user_id:
+        kv_path = kv_path.replace("{user_id}", _safe_user_segment(user_id))
+        logger.debug(f"Vault write path template expanded: {original_path} → {kv_path}")
+
+    url = _vault_build_url(vault_addr, kv_path)
+    logger.debug(f"Vault write URL: {url.replace(vault_token, '***TOKEN***')}")
+
+    # KV v2 API expects data wrapped in "data" key
+    payload = {"data": credentials}
+    body = json.dumps(payload).encode("utf-8")
+
+    request = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "X-Vault-Token": vault_token,
+            "Content-Type": "application/json",
+        },
+        method="PUT",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            logger.info(f"Credentials saved to Vault: {credentials.get('email')} (status {response.status})")
+            return True
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Vault write HTTP error {e.code}: {e.reason} at {url.replace(vault_token, '***')}")
+        return False
+    except urllib.error.URLError as e:
+        logger.warning(f"Vault write connection error: {e.reason}")
+        return False
+    except Exception as e:
+        logger.warning(f"Vault write error: {type(e).__name__}: {e}")
+        return False
 
 
 def _vault_build_url(vault_addr: str, kv_path: str) -> str:
