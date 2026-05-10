@@ -183,6 +183,7 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any], language
         "\n".join(
             [
                 "**🇺🇸 English**",
+                f"**Title**: {title_en}",
                 f"**{_tr('Main Recommendation', 'Hauptempfehlung')}**",
                 recommendation_en.strip() or "-",
                 f"**{_tr('Alternative', 'Alternative')}**",
@@ -191,6 +192,7 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any], language
                 reasoning_en or "-",
                 "",
                 "**🇩🇪 Deutsch**",
+                f"**{_tr('Title', 'Titel')}**: {title_de}",
                 f"**{_tr('Main Recommendation', 'Hauptempfehlung')}**",
                 recommendation_de.strip() or "-",
                 f"**{_tr('Alternative', 'Alternative')}**",
@@ -203,7 +205,7 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any], language
     )
 
     embed: dict[str, Any] = {
-        "title": f"PersonalGarminAICoach · 🇺🇸 {title_en} / 🇩🇪 {title_de}",
+        "title": "PersonalGarminAICoach · 🇺🇸 / 🇩🇪",
         "description": description,
         "color": 0x38BDF8,
         "fields": [
@@ -213,8 +215,6 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any], language
             {"name": "VO2Max", "value": f"{vo2_max}", "inline": True},
             {"name": "RHR", "value": f"{resting_hr}", "inline": True},
             {"name": _tr(language, "Intensity", "Intensitaet"), "value": f"{intensity}/10", "inline": True},
-            {"name": f"🇺🇸 {_tr('Reasoning', 'Begruendung')}", "value": reasoning_en or "-", "inline": False},
-            {"name": f"🇩🇪 {_tr('Reasoning', 'Begruendung')}", "value": reasoning_de or "-", "inline": False},
         ],
         "footer": {"text": "Garmin + AI · PersonalGarminAICoach"},
         "timestamp": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",

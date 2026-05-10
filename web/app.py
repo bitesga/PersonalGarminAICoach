@@ -1163,6 +1163,8 @@ def main() -> None:
                 notify_result = notify_recommendation(recommendation, profile, daily_stats=daily_stats)
             except TypeError:
                 notify_result = notify_recommendation(recommendation, profile)
+            except Exception as exc:
+                notify_result = {"sent": [], "errors": [f"Notification failed: {exc}"], "skipped": []}
             if notify_result["sent"]:
                 st.success(" | ".join(notify_result["sent"]))
                 _set_coach_status([tr("Sent", "Gesendet") + ": " + " | ".join(notify_result["sent"])], "success")
