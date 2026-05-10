@@ -1388,14 +1388,7 @@ def main() -> None:
                 _set_coach_status([tr("Refresh complete.", "Aktualisierung abgeschlossen.")], "success")
             _render_coach_status(status_box)
 
-        hero_text = tr(
-            "Fitness metrics, activities, and today's recommendation in one dashboard. The coach uses a 6-hour cache to save tokens.",
-            "Fitnesswerte, Aktivitaeten und die heutige Empfehlung in einem Dashboard. Der Coach nutzt einen 6-Stunden-Cache, um Tokens zu sparen.",
-        )
-        st.markdown(
-            f"<div class='hero'><h1>Personal Garmin AI Coach</h1><p>{hero_text}</p></div>",
-            unsafe_allow_html=True,
-        )
+       
         st.write("")
         _render_weather_status(st.session_state.get("current_weather"), lat, lon)
         st.write("")
