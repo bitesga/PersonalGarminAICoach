@@ -162,11 +162,15 @@ def _split_recommendation_text(recommendation_text: str, language: str = "en") -
 
 def _build_discord_recommendation_embed(recommendation: dict[str, Any], language: str = "en") -> dict[str, Any]:
     language = _normalize_language(language)
-    title = _clip(recommendation.get("title") or _tr(language, "Coach Recommendation", "Coach-Empfehlung"), 256)
+    title_en = _clip(recommendation.get("title_en") or recommendation.get("title") or "Coach Recommendation", 256)
+    title_de = _clip(recommendation.get("title_de") or recommendation.get("title") or "Coach-Empfehlung", 256)
     intensity = _clip(recommendation.get("intensity") or "n/a", 32)
-    recommendation_text = str(recommendation.get("recommendation") or "")
-    alternative_text = str(recommendation.get("alternative") or "")
-    reasoning = _clip(recommendation.get("reasoning") or "", 1024)
+    recommendation_en = str(recommendation.get("recommendation_en") or recommendation.get("recommendation") or "")
+    recommendation_de = str(recommendation.get("recommendation_de") or recommendation.get("recommendation") or "")
+    alternative_en = str(recommendation.get("alternative_en") or recommendation.get("alternative") or "")
+    alternative_de = str(recommendation.get("alternative_de") or recommendation.get("alternative") or "")
+    reasoning_en = _clip(recommendation.get("reasoning_en") or recommendation.get("reasoning") or "", 1024)
+    reasoning_de = _clip(recommendation.get("reasoning_de") or recommendation.get("reasoning") or "", 1024)
 
     latest_day = recommendation.get("latest_day", {}) if isinstance(recommendation.get("latest_day", {}), dict) else {}
     sleep_score = _clip(latest_day.get("sleep_score", "n/a"), 24)
@@ -175,18 +179,31 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any], language
     vo2_max = _clip(latest_day.get("vo2_max", "n/a"), 24)
     resting_hr = _clip(latest_day.get("resting_heart_rate", "n/a"), 24)
 
-    if alternative_text:
-        main_reco, alt_reco = recommendation_text.strip(), alternative_text.strip()
-    else:
-        main_reco, alt_reco = _split_recommendation_text(recommendation_text, language=language)
-
     description = _clip(
-        f"**{_tr(language, 'Main Recommendation', 'Hauptempfehlung')}**\n{main_reco}\n\n**{_tr(language, 'Alternative', 'Alternative')}**\n{alt_reco}",
+        "\n".join(
+            [
+                "**🇺🇸 English**",
+                f"**{_tr('Main Recommendation', 'Hauptempfehlung')}**",
+                recommendation_en.strip() or "-",
+                f"**{_tr('Alternative', 'Alternative')}**",
+                alternative_en.strip() or "-",
+                f"**{_tr('Reasoning', 'Begruendung')}**",
+                reasoning_en or "-",
+                "",
+                "**🇩🇪 Deutsch**",
+                f"**{_tr('Main Recommendation', 'Hauptempfehlung')}**",
+                recommendation_de.strip() or "-",
+                f"**{_tr('Alternative', 'Alternative')}**",
+                alternative_de.strip() or "-",
+                f"**{_tr('Reasoning', 'Begruendung')}**",
+                reasoning_de or "-",
+            ]
+        ),
         4096,
     )
 
     embed: dict[str, Any] = {
-        "title": f"PersonalGarminAICoach · {title}",
+        "title": f"PersonalGarminAICoach · 🇺🇸 {title_en} / 🇩🇪 {title_de}",
         "description": description,
         "color": 0x38BDF8,
         "fields": [
@@ -196,7 +213,8 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any], language
             {"name": "VO2Max", "value": f"{vo2_max}", "inline": True},
             {"name": "RHR", "value": f"{resting_hr}", "inline": True},
             {"name": _tr(language, "Intensity", "Intensitaet"), "value": f"{intensity}/10", "inline": True},
-            {"name": _tr(language, "Reasoning", "Begruendung"), "value": reasoning or "-", "inline": False},
+            {"name": f"🇺🇸 {_tr('Reasoning', 'Begruendung')}", "value": reasoning_en or "-", "inline": False},
+            {"name": f"🇩🇪 {_tr('Reasoning', 'Begruendung')}", "value": reasoning_de or "-", "inline": False},
         ],
         "footer": {"text": "Garmin + AI · PersonalGarminAICoach"},
         "timestamp": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",

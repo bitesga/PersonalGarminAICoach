@@ -183,6 +183,24 @@ MOBILITY_OPTIONS = ["Healthy", "Wheelchair", "Minor limitations"]
 GOAL_OPTIONS = ["Build Strength and Endurance", "Endurance Focus", "Strength Focus"]
 
 
+def _mobility_label(value: str) -> str:
+    labels = {
+        "Healthy": tr("Healthy", "Gesund"),
+        "Wheelchair": tr("Wheelchair", "Rollstuhl"),
+        "Minor limitations": tr("Minor limitations", "Leichte Einschraenkungen"),
+    }
+    return labels.get(value, value)
+
+
+def _goal_label(value: str) -> str:
+    labels = {
+        "Build Strength and Endurance": tr("Build Strength and Endurance", "Kraft und Ausdauer aufbauen"),
+        "Endurance Focus": tr("Endurance Focus", "Ausdauer Fokus"),
+        "Strength Focus": tr("Strength Focus", "Kraft Fokus"),
+    }
+    return labels.get(value, value)
+
+
 def _request_verification_compat(discord_id: str) -> dict[str, Any]:
     """Request a verification code with backward compatibility for older modules."""
     if hasattr(user_management, "request_verification"):
@@ -298,6 +316,8 @@ def _normalize_choice(value: Any, options: list[str], default_value: str) -> str
         return candidate
     lowered = candidate.lower()
     if options == MOBILITY_OPTIONS:
+        if "gesund" in lowered or "healthy" in lowered:
+            return "Healthy"
         if "wheelchair" in lowered:
             return "Wheelchair"
         if "limitation" in lowered:
@@ -306,12 +326,13 @@ def _normalize_choice(value: Any, options: list[str], default_value: str) -> str
     if options == GOAL_OPTIONS:
         if (
             "build strength and endurance" in lowered
+            or "kraft und ausdauer" in lowered
             or "strength and endurance" in lowered
         ):
             return "Build Strength and Endurance"
-        if "endurance" in lowered or "marathon" in lowered:
+        if "endurance" in lowered or "ausdauer" in lowered or "marathon" in lowered:
             return "Endurance Focus"
-        if "strength" in lowered:
+        if "strength" in lowered or "kraft" in lowered:
             return "Strength Focus"
     return default_value
 
@@ -340,7 +361,7 @@ def _init_state(user_id: str) -> None:
         st.session_state.trigger_notification_on_refresh = False
     st.session_state.setdefault("coach_status_lines", ["Ready."])
     st.session_state.setdefault("coach_status_level", "info")
-    st.session_state.setdefault("fresh_recommendation", None)
+    st.session_state.setdefault("fresh_recommendations_by_language", {})
     # Verification state: check if user has verified discord_user_id
     st.session_state.setdefault("discord_verified", bool(profile.get("discord_user_id", "").strip()))
 
@@ -496,236 +517,6 @@ def _resolve_location(profile: dict[str, Any]) -> tuple[float, float]:
         lon = 8.6842
     return float(lat), float(lon)
 
-
-
-def _render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
-    profile = load_user_profile(user_id=user_id) or {}
-    registered_via_email = str(user_id).startswith("email:")
-
-    with st.sidebar:
-        st.markdown("### Access & Profile")
-        st.selectbox(
-            "Mobility",
-            MOBILITY_OPTIONS,
-            key="mobility_config",
-            help="Choose the mobility profile that guides training selection.",
-        )
-        st.selectbox(
-            "Training goal",
-            GOAL_OPTIONS,
-            key="goal_config",
-            help="The goal is used to select the most suitable session.",
-        )
-        st.text_area(
-            "Other considerations",
-            key="preference_config",
-            height=96,
-            placeholder="e.g., no hard sprints, prefer mornings, outdoor only",
-            help="Extra notes the coach should consider.",
-        )
-        st.markdown("---")
-        st.markdown("### Coach")
-        reload_clicked = st.button("Refresh Garmin data", width="stretch")
-        refresh_clicked = st.button("Refresh recommendation (AI)", width="stretch")
-        status_box = st.empty()
-        _render_coach_status(status_box)
-        if reload_clicked:
-            _set_coach_status(["Refreshing Garmin data..."], "info")
-            with st.spinner("Refreshing Garmin data..."):
-                success, message = _reload_garmin_data(user_id)
-            auth_error = message.startswith("[AUTH_ERROR]")
-            rate_limit_error = message.startswith("[RATE_LIMIT]")
-            captcha_error = message.startswith("[CAPTCHA_REQUIRED]")
-            if success:
-                cache_used = message.startswith("[CACHE_USED]")
-                if cache_used:
-                    message = message.removeprefix("[CACHE_USED]\n")
-                    st.info("Garmin data updated from cached Garmin data.")
-                else:
-                    st.success("Garmin data updated.")
-                st.info(f"Last refresh: {_get_last_fetch_timestamp()}")
-                _set_coach_status(
-                    [
-                        "Garmin data updated from cached Garmin data." if cache_used else "Garmin data updated.",
-                        "Re-querying AI...",
-                    ],
-                    "info",
-                )
-            else:
-                if auth_error:
-                    message = message.removeprefix("[AUTH_ERROR]\n")
-                    st.error("Garmin login failed. Please check your email and password.")
-                    _set_coach_status(["Garmin login failed.", "Please check your email and password."], "error")
-                elif rate_limit_error:
-                    message = message.removeprefix("[RATE_LIMIT]\n")
-                    st.warning("Garmin is rate limiting the server. Using cached data if available.")
-                    _set_coach_status(["Garmin rate limit detected.", message], "warning")
-                elif captcha_error:
-                    message = message.removeprefix("[CAPTCHA_REQUIRED]\n")
-                    st.error("Garmin requires CAPTCHA approval. Cached data may be used instead.")
-                    _set_coach_status(["Garmin CAPTCHA required.", message], "error")
-                else:
-                    st.error("Garmin data could not be refreshed.")
-                    _set_coach_status(["Garmin refresh failed.", message], "error")
-            with st.expander("Reload output", expanded=False):
-                st.code(message, language="text")
-            st.session_state.refresh_recommendation = True
-            st.session_state.trigger_notification_on_refresh = True
-            st.rerun()
-        if refresh_clicked:
-            st.session_state.refresh_recommendation = True
-            st.session_state.trigger_notification_on_refresh = True
-            _set_coach_status(["Querying AI..."], "info")
-            st.rerun()
-
-        st.markdown("---")
-        st.markdown("### Accounts & Notifications")
-        st.markdown("#### Discord")
-        # Consider a Discord ID linked when `discord_user_id_config` is present
-        discord_already_linked = bool(str(st.session_state.get("discord_user_id_config", "")).strip())
-        if registered_via_email:
-            if discord_already_linked:
-                st.toggle("Send Discord DM", key="notify_discord_config")
-                # Show the already linked Discord ID clearly (read-only)
-                # Show the already linked Discord ID (read-only)
-                st.text_input(
-                    "Discord user ID",
-                    key="discord_user_id_config",
-                    help="Recipient ID for Discord DMs via bot token.",
-                    disabled=True,
-                )
-                st.caption("Discord is already linked.")
-            else:
-                st.text_input(
-                    "Discord user ID to link",
-                    key="link_discord_target_config",
-                    help="A 6-digit link code will be sent to this Discord ID.",
-                )
-                if st.button("Send code to Discord", width="stretch", key="send_link_discord_code_btn"):
-                    target_discord_id = str(st.session_state.link_discord_target_config).strip()
-                    if not target_discord_id:
-                        st.error("Please enter a Discord user ID.")
-                    else:
-                        link_user = user_management.request_contact_link(user_id, "discord", target_discord_id)
-                        code = str(link_user.get("pending_link", {}).get("verification_code", "")).strip()
-                        if not code:
-                            st.error("Could not generate a link code.")
-                        else:
-                            sent, msg = send_verification_dm(target_discord_id, code)
-                            if sent:
-                                st.success("Link code sent via Discord DM.")
-                            else:
-                                st.error(f"Discord send failed: {msg}")
-                st.text_input("Discord link code", key="link_discord_code_config", help="Enter the 6-digit code from Discord.")
-                if st.button("Link Discord", width="stretch", key="verify_link_discord_code_btn"):
-                    target_discord_id = str(st.session_state.link_discord_target_config).strip()
-                    code = str(st.session_state.link_discord_code_config).strip()
-                    if not target_discord_id:
-                        st.error("Please enter the Discord user ID first.")
-                    elif not code:
-                        st.error("Please enter the link code.")
-                    else:
-                        ok = user_management.verify_contact_link(user_id, "discord", target_discord_id, code)
-                        if ok:
-                            profile = load_user_profile(user_id=user_id) or {}
-                            profile["discord_user_id"] = target_discord_id
-                            profile["notify_discord"] = True
-                            save_user_profile(profile, user_id=user_id)
-                            st.session_state.discord_user_id_config = target_discord_id
-                            st.session_state.notify_discord_config = True
-                            st.success("Discord linked successfully.")
-                        else:
-                            st.error("Link code is invalid or expired.")
-        else:
-            st.toggle("Send Discord DM", key="notify_discord_config")
-            st.text_input("Discord user ID", key="discord_user_id_config", help="Recipient ID for Discord DMs via bot token.")
-            st.caption("Registered with Discord.")
-
-        st.markdown("#### Email")
-        # Consider email linked when `email_config` is set
-        email_already_linked = bool(str(st.session_state.get("email_config", "")).strip())
-        if registered_via_email:
-            st.toggle("Send email notifications", key="notify_email_config")
-            st.text_input(
-                "Email address",
-                key="email_config",
-                help="Email address for daily recommendations with HTML formatting.",
-                disabled=email_already_linked,
-            )
-            st.caption("Registered with email.")
-        else:
-            if email_already_linked:
-                st.toggle("Send email notifications", key="notify_email_config")
-                st.text_input("Email address", key="email_config", help="Email address for daily recommendations with HTML formatting.")
-                st.caption("Email is already linked.")
-            else:
-                st.text_input(
-                    "Email to link",
-                    key="link_email_target_config",
-                    help="A 6-digit link code will be sent to this address.",
-                )
-                if st.button("Send code to email", width="stretch", key="send_link_email_code_btn"):
-                    target_email = str(st.session_state.link_email_target_config).strip().lower()
-                    if not target_email:
-                        st.error("Please enter an email address.")
-                    else:
-                        link_user = user_management.request_contact_link(user_id, "email", target_email)
-                        code = str(link_user.get("pending_link", {}).get("verification_code", "")).strip()
-                        if not code:
-                            st.error("Could not generate a link code.")
-                        else:
-                            subject = "Your link code for PersonalGarminAICoach"
-                            text = (
-                                f"Your link code for connecting your account is: {code}\n\n"
-                                "Enter this code in the app to link your email for notifications."
-                            )
-                            html = f"<p>Your link code for connecting your account is: <strong>{code}</strong></p>"
-                            sent, msg = send_email(subject=subject, body_text=text, body_html=html, recipient_email=target_email)
-                            if sent:
-                                st.success("Link code sent via email.")
-                            else:
-                                st.error(f"Email send failed: {msg}")
-                st.text_input("Email link code", key="link_email_code_config", help="Enter the 6-digit code from the email.")
-                if st.button("Link email", width="stretch", key="verify_link_email_code_btn"):
-                    target_email = str(st.session_state.link_email_target_config).strip().lower()
-                    code = str(st.session_state.link_email_code_config).strip()
-                    if not target_email:
-                        st.error("Please enter the email address first.")
-                    elif not code:
-                        st.error("Please enter the link code.")
-                    else:
-                        ok = user_management.verify_contact_link(user_id, "email", target_email, code)
-                        if ok:
-                            profile = load_user_profile(user_id=user_id) or {}
-                            profile["linked_email"] = target_email
-                            profile["email"] = target_email
-                            profile["notify_email"] = True
-                            save_user_profile(profile, user_id=user_id)
-                            st.session_state.linked_email_config = target_email
-                            st.session_state.email_config = target_email
-                            st.session_state.notify_email_config = True
-                            st.success("Email linked successfully.")
-                        else:
-                            st.error("Link code is invalid or expired.")
-
-        st.markdown("---")
-        save_clicked = st.button("Save profile", width="stretch")
-        if save_clicked:
-            _save_profile_from_sidebar(user_id=user_id)
-            st.success("Profile saved")
-
-        logout_clicked = st.button("Log out", width="stretch")
-        if logout_clicked:
-            st.session_state.discord_verified = False
-            _clear_auth_query_param()
-            st.session_state.pop("active_discord_id", None)
-            st.session_state.pop("temp_discord_id", None)
-            st.session_state.pop("temp_code_input", None)
-            st.session_state.pop("temp_code_sent", None)
-            st.info("You have been logged out. Please register again.")
-            st.rerun()
-
-    return _save_profile_from_sidebar(user_id=user_id), status_box
 
 
 def _resolve_verify_email_password() -> Any:
@@ -1334,6 +1125,8 @@ def main() -> None:
     with tab_dashboard:
         refresh = bool(st.session_state.pop("refresh_recommendation", False))
         notify_on_refresh = bool(st.session_state.pop("trigger_notification_on_refresh", False))
+        current_language = str(st.session_state.get("ui_language", "en")).strip().lower() or "en"
+        fresh_recommendations = st.session_state.get("fresh_recommendations_by_language", {})
 
         if refresh:
             _set_coach_status([tr("Querying AI...", "KI wird abgefragt...")], "info")
@@ -1346,13 +1139,14 @@ def main() -> None:
                     refresh=True,
                     user_id=active_user_id,
                 )
-            # Store the fresh recommendation in session state so it displays immediately on page reload (not the 6h-old cache)
-            st.session_state.fresh_recommendation = recommendation
+            # Store the fresh recommendation per language so switching EN/DE does not reuse the wrong variant.
+            fresh_recommendations[current_language] = recommendation
+            st.session_state.fresh_recommendations_by_language = fresh_recommendations
             _set_coach_status([tr("Loading AI response into the dashboard.", "KI-Antwort wird ins Dashboard geladen.")], "info")
             _render_coach_status(status_box)
         else:
-            # Check if we have a fresh recommendation from a recent refresh; otherwise load from cache
-            recommendation = st.session_state.get("fresh_recommendation")
+            # Check if we have a fresh recommendation for the active language; otherwise load from cache.
+            recommendation = fresh_recommendations.get(current_language)
             if not recommendation:
                 recommendation = _invoke_get_coach_recommendation(
                     profile=coach_profile,

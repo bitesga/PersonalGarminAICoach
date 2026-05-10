@@ -42,12 +42,32 @@ MOBILITY_OPTIONS = ["Healthy", "Wheelchair", "Minor limitations"]
 GOAL_OPTIONS = ["Build Strength and Endurance", "Endurance Focus", "Strength Focus"]
 
 
+def _mobility_label(value: str) -> str:
+    labels = {
+        "Healthy": tr("Healthy", "Gesund"),
+        "Wheelchair": tr("Wheelchair", "Rollstuhl"),
+        "Minor limitations": tr("Minor limitations", "Leichte Einschraenkungen"),
+    }
+    return labels.get(value, value)
+
+
+def _goal_label(value: str) -> str:
+    labels = {
+        "Build Strength and Endurance": tr("Build Strength and Endurance", "Kraft und Ausdauer aufbauen"),
+        "Endurance Focus": tr("Endurance Focus", "Ausdauer Fokus"),
+        "Strength Focus": tr("Strength Focus", "Kraft Fokus"),
+    }
+    return labels.get(value, value)
+
+
 def _normalize_choice(value: Any, options: list[str], default_value: str) -> str:
     candidate = str(value).strip()
     if candidate in options:
         return candidate
     lowered = candidate.lower()
     if options == MOBILITY_OPTIONS:
+        if "gesund" in lowered or "healthy" in lowered:
+            return "Healthy"
         if "wheelchair" in lowered:
             return "Wheelchair"
         if "limitation" in lowered:
@@ -56,12 +76,13 @@ def _normalize_choice(value: Any, options: list[str], default_value: str) -> str
     if options == GOAL_OPTIONS:
         if (
             "build strength and endurance" in lowered
+            or "kraft und ausdauer" in lowered
             or "strength and endurance" in lowered
         ):
             return "Build Strength and Endurance"
-        if "endurance" in lowered or "marathon" in lowered:
+        if "endurance" in lowered or "ausdauer" in lowered or "marathon" in lowered:
             return "Endurance Focus"
-        if "strength" in lowered:
+        if "strength" in lowered or "kraft" in lowered:
             return "Strength Focus"
     return default_value
 
@@ -286,8 +307,20 @@ def render_sidebar(user_id: str) -> tuple[dict[str, Any], Any]:
         if LOGO_PATH.exists():
             st.image(str(LOGO_PATH), width=88)
         st.markdown(f"### {tr('Access & Profile', 'Zugang & Profil')}")
-        st.selectbox(tr("Mobility", "Mobilitaet"), MOBILITY_OPTIONS, key="mobility_config", help=tr("Choose the mobility profile that guides training selection.", "Waehle das Mobilitaetsprofil fuer die Trainingsempfehlung."))
-        st.selectbox(tr("Training goal", "Trainingsziel"), GOAL_OPTIONS, key="goal_config", help=tr("The goal is used to select the most suitable session.", "Das Ziel wird fuer die passende Session verwendet."))
+        st.selectbox(
+            tr("Mobility", "Mobilitaet"),
+            MOBILITY_OPTIONS,
+            key="mobility_config",
+            format_func=_mobility_label,
+            help=tr("Choose the mobility profile that guides training selection.", "Waehle das Mobilitaetsprofil fuer die Trainingsempfehlung."),
+        )
+        st.selectbox(
+            tr("Training goal", "Trainingsziel"),
+            GOAL_OPTIONS,
+            key="goal_config",
+            format_func=_goal_label,
+            help=tr("The goal is used to select the most suitable session.", "Das Ziel wird fuer die passende Session verwendet."),
+        )
         st.text_area(
             tr("Other considerations", "Weitere Hinweise"),
             key="preference_config",

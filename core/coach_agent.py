@@ -40,15 +40,17 @@ class CoachProfile:
 
 COACH_SYSTEM_PROMPT = (
     "You are a precise fitness coach with ABSOLUTE priority on overload protection. "
-    "Reply ONLY as JSON with the keys title, recommendation, alternative, intensity, reasoning. "
+    "Reply ONLY as JSON with BOTH English and German versions. "
+    "Use these keys: title_en, title_de, recommendation_en, recommendation_de, alternative_en, alternative_de, intensity, reasoning_en, reasoning_de. "
     "The recommendation MUST describe exactly the next concrete session or at most the next 1-2 sessions (duration, structure, intensity). "
     "No weekly plans, no routines, no frequency statements like '2 times per week'. "
-    "Use concrete numbers and ALWAYS include an alternative as its own key (alternative). "
+    "Use concrete numbers and ALWAYS include alternatives as their own keys (alternative_en / alternative_de). "
     "IMPORTANT: If Body Battery < 50 OR Sleep < 60, then ONLY recovery training with intensity 1-4. "
     "The reasoning MUST explicitly reference current health data (Sleep Score, Body Battery, Stress, VO2Max, RHR, last activity). "
     "IMPORTANT: In the reasoning, ALWAYS use the exact goal name from the user profile. No synonyms or paraphrases. "
     "No generic phrases. "
-    "IMPORTANT: If Body Battery is around 35 or lower, say that no training should be done today and return title 'Rest Day'."
+    "IMPORTANT: If Body Battery is around 35 or lower, say that no training should be done today and return title 'Rest Day'. "
+    "IMPORTANT: In the German translation, use transliteration with ae/oe/ue instead of umlauts. "
 )
 
 
@@ -144,27 +146,31 @@ def _render_fallback(key: str, latest_day: dict[str, Any], assets: dict[str, Any
 
 def _normalize_recommendation_keys(recommendation: dict[str, Any]) -> dict[str, Any]:
     result = dict(recommendation or {})
-
-    title = result.get("title")
-    recommendation_text = result.get("recommendation")
-    alternative = result.get("alternative")
-    if not alternative:
-        alt_raw = str(recommendation_text or "")
-        if "Alternative:" in alt_raw:
-            main_reco, alt_reco = alt_raw.split("Alternative:", 1)
-            recommendation_text = main_reco.strip()
-            alternative = alt_reco.strip()
-
+    
+    # Handle both single-language (legacy) and bilingual responses
+    # Bilingual: title_en, title_de, recommendation_en, recommendation_de, etc.
+    # Legacy: title, recommendation, alternative, reasoning
+    title_en = result.get("title_en") or result.get("title") or "Recommendation"
+    title_de = result.get("title_de") or result.get("title") or "Empfehlung"
+    recommendation_en = result.get("recommendation_en") or result.get("recommendation") or ""
+    recommendation_de = result.get("recommendation_de") or result.get("recommendation") or ""
+    alternative_en = result.get("alternative_en") or result.get("alternative") or ""
+    alternative_de = result.get("alternative_de") or result.get("alternative") or ""
     intensity = result.get("intensity")
-    reasoning = result.get("reasoning")
-
+    reasoning_en = result.get("reasoning_en") or result.get("reasoning") or ""
+    reasoning_de = result.get("reasoning_de") or result.get("reasoning") or ""
+    
     result.update(
         {
-            "title": title or "Recommendation",
-            "recommendation": recommendation_text or "",
-            "alternative": alternative or "",
+            "title_en": title_en,
+            "title_de": title_de,
+            "recommendation_en": recommendation_en,
+            "recommendation_de": recommendation_de,
+            "alternative_en": alternative_en,
+            "alternative_de": alternative_de,
             "intensity": intensity,
-            "reasoning": reasoning or "",
+            "reasoning_en": reasoning_en,
+            "reasoning_de": reasoning_de,
         }
     )
     return result
@@ -452,7 +458,7 @@ def build_coach_prompt(
             f"TRAINING BALANCE: training_balance_feedback='{training_balance_feedback}' - If 'AEROBIC_HIGH_SHORTAGE': recommend high intensity aerobic if aligned with goal. If 'AEROBIC_LOW_SHORTAGE': recommend low intensity aerobic. If 'ANAEROBIC': recommend strength/anaerobic stimulus.",
             "WEATHER: if 5 <= temperature_c <= 35 and precipitation_mm <= 20, the main recommendation must be outdoor. Otherwise the main recommendation must be indoor.",
             "ALWAYS: In the recommendation, explicitly start with 'Outdoor session:' or 'Indoor session:'. In the reasoning, cite the weather data and explain why indoor/outdoor was chosen.",
-            f"LANGUAGE: write title, recommendation, alternative and reasoning in '{language}' only.",
+            "LANGUAGE: Always provide BOTH English AND German versions. Title and recommendation in both languages. Reasoning in both languages. Alternative in both languages.",
             "If data is strong and goal is Marathon, prefer a concrete long run, tempo run, or technique session over a general rule.",
             "No running intervals for wheelchair users; suggest handbike or upper-body strength-endurance instead.",
             "Prefer outdoor sessions when recovery is not critical.",
@@ -703,53 +709,29 @@ def _enrich_recommendation(
     weather: dict[str, Any] | None = None,
     language: str = "en",
 ) -> dict[str, Any]:
-    base = _concrete_next_training(profile, daily_stats, activities)
+    """Normalize and apply weather context to the AI recommendation.
+    
+    Trust the AI response completely - it already has all the health data and decision logic.
+    Only apply minimal processing: normalize keys, fix goal references, and add weather context.
+    """
     result = _normalize_recommendation_keys(recommendation)
-
-    if _needs_enrichment(result):
-        return base
-
-    # Check recovery status - if recovery is low, always use base recommendation
-    latest_day = _latest_stat_day(daily_stats)
-    sleep_score = _as_number(latest_day.get("sleep_score"))
-    body_battery = _as_number(latest_day.get("body_battery"))
+    language = _normalize_language(language)
     
-    recovery_low = (
-        (sleep_score is not None and sleep_score < 60)
-        or (body_battery is not None and body_battery < 50)  # Lowered threshold from 40 to 50
-    )
-    # If Body Battery is critically low, prefer explicit rest day fallback
-    rest_day = body_battery is not None and body_battery < REST_DAY_BODY_BATTERY_THRESHOLD
-    if rest_day:
-        return base
+    # Select correct language version
+    lang_suffix = "_de" if language == "de" else "_en"
     
-    # If recovery is low, always use the safe fallback recommendation
-    if recovery_low:
-        return base
-
-    result.setdefault("title", base["title"])
+    # Map bilingual fields to single-language fields for rendering
+    result["title"] = result.get(f"title{lang_suffix}", "Recommendation")
+    result["recommendation"] = result.get(f"recommendation{lang_suffix}", "")
+    result["alternative"] = result.get(f"alternative{lang_suffix}", "")
+    result["reasoning"] = result.get(f"reasoning{lang_suffix}", "")
+    result["intensity"] = result.get("intensity", 5)
     
-    # Adjust intensity based on goal if needed
-    current_intensity = _to_intensity(result.get("intensity"), 5)
-    goal_baseline = _calculate_goal_intensity_baseline(profile.goal)
-    if current_intensity < goal_baseline - 1:
-        result["intensity"] = goal_baseline
-    else:
-        result["intensity"] = current_intensity
-    
-    if not str(result.get("reasoning", "")).strip() or str(result.get("reasoning", "")).strip().lower() in {"n/a", "na"}:
-        result["reasoning"] = base["reasoning"]
-    else:
-        # Fix goal references in reasoning
+    # Fix goal references in reasoning (language/naming consistency)
+    if str(result.get("reasoning", "")).strip():
         result["reasoning"] = _fix_goal_references(result["reasoning"], profile.goal)
-    
-    if not str(result.get("alternative", "")).strip():
-        result["alternative"] = base.get("alternative", "")
-    if not str(result.get("alternative", "")).strip():
-        fallback_alt = str(base.get("recommendation", "")).split("Alternative:", 1)
-        if len(fallback_alt) > 1:
-            result["alternative"] = fallback_alt[1].strip()
-    
+
+    # Apply weather context (adds weather description, adjusts env/indoor-outdoor)
     return _apply_weather_context(result, weather, language=language)
 
 
@@ -806,6 +788,7 @@ def generate_coach_recommendation(
             recommendation = _extract_json_response(response_text)
             recommendation = _normalize_recommendation_keys(recommendation)
             recommendation = _enrich_recommendation(recommendation, profile, daily_stats, activities, weather=weather, language=language)
+            
             recommendation["source"] = "model"
             recommendation["model_attempt"] = attempt
             recommendation["language"] = language
