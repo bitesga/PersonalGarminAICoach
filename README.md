@@ -1,6 +1,6 @@
 # Personal Garmin AI Coach
 
-An autonomous Python app that analyzes Garmin fitness data and produces adaptive training recommendations. The system combines Garmin data ingestion, an LLM-backed coach, deterministic fallbacks, and a Streamlit dashboard for configuration, onboarding, and manual data entry.
+An autonomous Python app that analyzes Garmin fitness data and produces adaptive training recommendations. The system combines Garmin data ingestion, an LLM-backed coach, and a Streamlit dashboard for configuration, onboarding, and manual data entry.
 
 ## Highlights
 
@@ -130,8 +130,9 @@ The app includes a language selector in the top-right corner of the dashboard.
 
 - Supported languages: English and German.
 - The selected language is saved per user profile.
-- The coach output, dashboard labels, notifications, and email/Discord messages follow the selected language.
-- Automatic recommendations use the same saved language for each user.
+- The coach output is requested from the LLM in both English and German simultaneously; the model returns bilingual fields such as `title_en` / `title_de`, `recommendation_en` / `recommendation_de`, `alternative_en` / `alternative_de`, and `reasoning_en` / `reasoning_de` in a single response to avoid extra translation calls.
+- For German text we use transliteration (ae/oe/ue) to maximize compatibility with downstream renderers and notifications.
+- Dashboard labels and notifications display the selected language; automatic recommendations use the saved language per user.
 
 ## Automatic Recommendations
 
@@ -149,11 +150,12 @@ Notes:
 
 ## Coach Logic Overview
 
-The coach is designed to be concrete and safe:
+The coach is designed to be concrete and safe and now trusts the LLM output as the primary decision source:
 
-- Always returns JSON with keys: `title`, `recommendation`, `alternative`, `intensity`, `reasoning`
-- Avoids weekly plans or generic guidance
-- Uses health data to enforce recovery protections
+- The LLM is requested to return bilingual JSON with keys: `title_en`, `title_de`, `recommendation_en`, `recommendation_de`, `alternative_en`, `alternative_de`, `intensity`, `reasoning_en`, `reasoning_de`.
+- The application no longer applies deterministic fallback recommendations that overwrite the model response; when the model returns a valid recommendation it is used directly.
+- Avoids weekly plans or generic guidance.
+- Uses health data to enforce recovery protections:
   - Sleep < 60 or Body Battery < 50 forces low intensity (1-4)
   - Body Battery < 35 forces a Rest Day
 - Goal-based intensity baseline
