@@ -340,6 +340,7 @@ def _init_state(user_id: str) -> None:
         st.session_state.trigger_notification_on_refresh = False
     st.session_state.setdefault("coach_status_lines", ["Ready."])
     st.session_state.setdefault("coach_status_level", "info")
+    st.session_state.setdefault("fresh_recommendation", None)
     # Verification state: check if user has verified discord_user_id
     st.session_state.setdefault("discord_verified", bool(profile.get("discord_user_id", "").strip()))
 
@@ -1345,16 +1346,21 @@ def main() -> None:
                     refresh=True,
                     user_id=active_user_id,
                 )
+            # Store the fresh recommendation in session state so it displays immediately on page reload (not the 6h-old cache)
+            st.session_state.fresh_recommendation = recommendation
             _set_coach_status([tr("Loading AI response into the dashboard.", "KI-Antwort wird ins Dashboard geladen.")], "info")
             _render_coach_status(status_box)
         else:
-            recommendation = _invoke_get_coach_recommendation(
-                profile=coach_profile,
-                daily_stats=daily_stats,
-                activities=activities,
-                refresh=False,
-                user_id=active_user_id,
-            )
+            # Check if we have a fresh recommendation from a recent refresh; otherwise load from cache
+            recommendation = st.session_state.get("fresh_recommendation")
+            if not recommendation:
+                recommendation = _invoke_get_coach_recommendation(
+                    profile=coach_profile,
+                    daily_stats=daily_stats,
+                    activities=activities,
+                    refresh=False,
+                    user_id=active_user_id,
+                )
 
         if notify_on_refresh:
             _set_coach_status([tr("Sending notification...", "Benachrichtigung wird gesendet...")], "info")
