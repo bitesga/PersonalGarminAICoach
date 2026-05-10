@@ -192,7 +192,7 @@ def _build_discord_recommendation_embed(recommendation: dict[str, Any], language
                 reasoning_en or "-",
                 "",
                 "**🇩🇪 Deutsch**",
-                f"**{_tr('Title', 'Titel')}**: {title_de}",
+                f"**{_tr(language, 'Title', 'Titel')}**: {title_de}",
                 f"**{_tr(language, 'Main Recommendation', 'Hauptempfehlung')}**",
                 recommendation_de.strip() or "-",
                 f"**{_tr(language, 'Alternative', 'Alternative')}**",
