@@ -156,24 +156,6 @@ CUSTOM_CSS = """
   padding-left: 1rem;
 }
 
-.facts-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 0.8rem;
-    margin-top: 0.6rem;
-}
-
-.fact-title {
-    color: var(--muted);
-    font-size: 0.82rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-
-.fact-value {
-    font-size: 1.6rem;
-    font-weight: 700;
-}
 
 .section-title {
   margin: 0 0 0.5rem 0;
@@ -1101,13 +1083,6 @@ def _render_language_switcher() -> None:
         )
 
 
-def _count_local_users() -> int:
-    users_dir = ROOT_DIR / "data" / "users"
-    if not users_dir.exists():
-        return 0
-    return sum(1 for entry in users_dir.iterdir() if entry.is_dir())
-
-
 def _render_about_tab() -> None:
     st.markdown(
         """
@@ -1120,73 +1095,47 @@ def _render_about_tab() -> None:
     )
 
     st.write("")
-    left, right = st.columns([1.1, 1])
-    with left:
-        st.markdown(
-            """
-            <div class="card">
-              <div class="small-label">Problem</div>
-              <ul>
-                <li>Daten-Silos: Garmin sammelt Daten, liefert aber kaum konkrete Handlungsschritte.</li>
-                <li>Starre Plaene ignorieren Schlaf, Stress und Tagesform.</li>
-                <li>Standard-Algorithmen sind selten barrierefrei (z.B. Rollstuhl).</li>
-              </ul>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.write("")
-        st.markdown(
-            """
-            <div class="card">
-              <div class="small-label">Loesung</div>
-              <ul>
-                <li>Closed-Loop: Daten → KI-Analyse → Wetter → Benachrichtigung.</li>
-                <li>Hyper-personalisiert nach Mobilitaet, Ziel und Sprache (DE/EN).</li>
-                <li>Autonom: Auto-Trigger liefert Vorschlaege, waehrend der Nutzer schlaeft.</li>
-              </ul>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with right:
-        users_count = _count_local_users()
-        local_users_label = tr("Local users", "Lokale Nutzer")
-        updated_label = tr("Updated", "Aktualisiert")
-        last_fetch = _get_last_fetch_timestamp()
-        st.markdown(
-                f"""
-                <div class="card">
-                    <div class="small-label">Live Facts</div>
-                    <div class="facts-grid">
-                        <div>
-                            <div class="fact-title">{local_users_label}</div>
-                            <div class="fact-value">{users_count}</div>
-                        </div>
-                        <div>
-                            <div class="fact-title">{updated_label}</div>
-                            <div class="fact-value">{last_fetch}</div>
-                        </div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-        )
-
-        st.write("")
-        st.markdown(
-            """
-            <div class="card">
-              <div class="small-label">Links</div>
-              <ul>
-                <li><a href="https://garmin-ai-coach.duckdns.org/" target="_blank">Live-Demo (DuckDNS)</a></li>
-                <li><a href="http://80.158.78.0:8080/" target="_blank">Live-Demo (IP)</a></li>
-                <li><a href="https://github.com/bitesga/PersonalGarminAICoach" target="_blank">GitHub Repository</a></li>
-              </ul>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+    st.markdown(
+        """
+        <div class="card">
+            <div class="small-label">Problem</div>
+            <ul>
+            <li>Daten-Silos: Garmin sammelt Daten, liefert aber kaum konkrete Handlungsschritte.</li>
+            <li>Starre Plaene ignorieren Schlaf, Stress und Tagesform.</li>
+            <li>Standard-Algorithmen sind selten barrierefrei (z.B. Rollstuhl).</li>
+            </ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.write("")
+    st.markdown(
+        """
+        <div class="card">
+            <div class="small-label">Loesung</div>
+            <ul>
+            <li>Closed-Loop: Daten → KI-Analyse → Wetter → Benachrichtigung.</li>
+            <li>Hyper-personalisiert nach Mobilitaet, Ziel und Sprache (DE/EN).</li>
+            <li>Autonom: Auto-Trigger liefert Vorschlaege, waehrend der Nutzer schlaeft.</li>
+            </ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.write("")
+    st.markdown(
+        """
+        <div class="card">
+            <div class="small-label">Links</div>
+            <ul>
+            <li><a href="https://garmin-ai-coach.duckdns.org/" target="_blank">Live-Demo (DuckDNS)</a></li>
+            <li><a href="http://80.158.78.0:8080/" target="_blank">Live-Demo (IP)</a></li>
+            <li><a href="https://github.com/bitesga/PersonalGarminAICoach" target="_blank">GitHub Repository</a></li>
+            </ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.write("")
     st.markdown(f"### {tr('Architecture', 'Systemarchitektur')}")
