@@ -760,8 +760,32 @@ def _render_metric_history_tabs(daily_stats: dict[str, Any]) -> None:
     if not keys:
         return
 
-    def _series_for(key_name: str) -> list[float]:
-        series: list[float] = []
+    def _parse_date_key(date_key: str) -> datetime | None:
+        try:
+            return datetime.strptime(date_key, "%Y-%m-%d")
+        except Exception:
+            return None
+
+    def _date_axis_label(date_key: str) -> str:
+        parsed = _parse_date_key(date_key)
+        if parsed is None:
+            return date_key
+
+        diff_days = (datetime.now().date() - parsed.date()).days
+        if diff_days == 0:
+            return tr("Today", "Heute")
+        if diff_days == 1:
+            return tr("Yesterday", "Gestern")
+        if 2 <= diff_days <= 6:
+            return tr(f"{diff_days} days ago", f"vor {diff_days} Tagen")
+        return parsed.strftime("%d.%m")
+
+    def _date_tooltip_label(date_key: str) -> str:
+        parsed = _parse_date_key(date_key)
+        return parsed.strftime("%d.%m.%Y") if parsed else date_key
+
+    def _series_for(key_name: str) -> list[dict[str, Any]]:
+        series: list[dict[str, Any]] = []
         for date_key in keys:
             day = daily_stats.get(date_key, {})
             if not isinstance(day, dict):
@@ -769,24 +793,39 @@ def _render_metric_history_tabs(daily_stats: dict[str, Any]) -> None:
             value = _to_number(day.get(key_name))
             if value is None:
                 continue
-            series.append(value)
+            series.append(
+                {
+                    "x_label": _date_axis_label(date_key),
+                    "full_date": _date_tooltip_label(date_key),
+                    "value": value,
+                }
+            )
         return series
 
-    def _render_chart(series: list[float]) -> None:
+    def _render_chart(series: list[dict[str, Any]]) -> None:
         if not series:
             return
-        min_value = min(series)
-        max_value = max(series)
+        values = [float(point["value"]) for point in series]
+        min_value = min(values)
+        max_value = max(values)
         y_min = min_value - 10
         y_max = max_value + 10
-        data = [{"idx": idx + 1, "value": value} for idx, value in enumerate(series)]
+        x_order = [str(point["x_label"]) for point in series]
         chart = (
-            alt.Chart(alt.Data(values=data))
+            alt.Chart(alt.Data(values=series))
             .mark_line(point=True)
             .encode(
-                x=alt.X("idx:Q", title=None),
+                x=alt.X(
+                    "x_label:N",
+                    title=None,
+                    sort=x_order,
+                    axis=alt.Axis(labelAngle=0),
+                ),
                 y=alt.Y("value:Q", title=None, scale=alt.Scale(domain=[y_min, y_max])),
-                tooltip=[alt.Tooltip("idx:Q"), alt.Tooltip("value:Q")],
+                tooltip=[
+                    alt.Tooltip("full_date:N", title=tr("Date", "Datum")),
+                    alt.Tooltip("value:Q", title=tr("Value", "Wert")),
+                ],
             )
             .properties(height=160)
         )
