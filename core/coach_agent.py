@@ -510,8 +510,13 @@ class GroqCoachClient:
 
     @staticmethod
     def _fallback_models() -> list[str]:
-        raw = os.getenv("GROQ_FALLBACK_MODELS", "openai/gpt-oss-20b, llama-3.1-8b-instant")
+        raw = os.getenv("GROQ_FALLBACK_MODELS", "openai/gpt-oss-20b")
         return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @staticmethod
+    def _is_model_not_found_error(exc: Exception) -> bool:
+        message = str(exc).upper()
+        return "MODEL_NOT_FOUND" in message or "DOES NOT EXIST OR YOU DO NOT HAVE ACCESS" in message
 
     @staticmethod
     def _extract_message_text(message: Any) -> str:
@@ -547,6 +552,7 @@ class GroqCoachClient:
     def generate_content(self, prompt: str) -> Any:
         model_candidates = [self._model_name] + [m for m in self._fallback_models() if m != self._model_name]
         last_error: Exception | None = None
+        inaccessible_models: list[str] = []
 
         for candidate_model in model_candidates:
             try:
@@ -568,11 +574,17 @@ class GroqCoachClient:
                     return type("GroqTextResponse", (), {"text": content, "model": candidate_model})()
                 last_error = ValueError(f"EMPTY_RESPONSE_FROM_PROVIDER model={candidate_model}")
             except Exception as exc:
+                if self._is_model_not_found_error(exc):
+                    inaccessible_models.append(candidate_model)
+                    continue
                 last_error = exc
                 continue
 
         if last_error is not None:
             raise last_error
+        if inaccessible_models:
+            tried = ", ".join(inaccessible_models)
+            raise ValueError(f"EMPTY_RESPONSE_FROM_PROVIDER inaccessible_models={tried}")
         raise ValueError("EMPTY_RESPONSE_FROM_PROVIDER")
 
 
