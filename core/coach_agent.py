@@ -42,6 +42,7 @@ class CoachProfile:
 COACH_SYSTEM_PROMPT = (
     "You are a precise fitness coach with ABSOLUTE priority on overload protection. "
     "Reply ONLY as JSON with BOTH English and German versions. "
+    "Do not output thinking traces, analysis, or tags like <think>. "
     "Use these keys: title_en, title_de, recommendation_en, recommendation_de, alternative_en, alternative_de, intensity, reasoning_en, reasoning_de. "
     "The recommendation MUST describe exactly the next concrete session or at most the next 1-2 sessions (duration, structure, intensity). "
     "No weekly plans, no routines, no frequency statements like '2 times per week'. "
@@ -566,11 +567,19 @@ class GroqCoachClient:
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.2,
-                    max_tokens=450,
+                    max_tokens=1200,
+                    reasoning_effort="none",
                 )
                 message = response.choices[0].message if response.choices else None
                 content = self._extract_message_text(message).strip()
                 if content:
+                    lowered = content.lower()
+                    if "<think" in lowered and "{" not in content:
+                        last_error = ValueError(f"UNPARSEABLE_MODEL_OUTPUT model={candidate_model} think_only")
+                        continue
+                    if "{" not in content and "```" not in content:
+                        last_error = ValueError(f"UNPARSEABLE_MODEL_OUTPUT model={candidate_model} no_json_markers")
+                        continue
                     return type("GroqTextResponse", (), {"text": content, "model": candidate_model})()
                 last_error = ValueError(f"EMPTY_RESPONSE_FROM_PROVIDER model={candidate_model}")
             except Exception as exc:
@@ -593,12 +602,52 @@ def _extract_json_response(response_text: str) -> dict[str, Any]:
     if not cleaned:
         raise ValueError("EMPTY_RESPONSE_FROM_PROVIDER")
 
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`").strip()
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:].strip()
+    # Strip markdown code fences and hidden reasoning wrappers some models prepend.
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    if fenced:
+        cleaned = fenced.group(1).strip()
+
+    cleaned = re.sub(r"<think>.*?</think>", " ", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+    if cleaned.lower().startswith("<think") and "{" in cleaned:
+        cleaned = cleaned[cleaned.find("{") :].strip()
+
+    def _first_balanced_json_object(text: str) -> str | None:
+        start_idx = text.find("{")
+        if start_idx == -1:
+            return None
+
+        depth = 0
+        in_string = False
+        escape = False
+        for idx in range(start_idx, len(text)):
+            char = text[idx]
+            if in_string:
+                if escape:
+                    escape = False
+                    continue
+                if char == "\\":
+                    escape = True
+                    continue
+                if char == '"':
+                    in_string = False
+                continue
+
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start_idx : idx + 1]
+
+        return None
 
     candidates = [cleaned]
+    first_object = _first_balanced_json_object(cleaned)
+    if first_object:
+        candidates.append(first_object)
+
     start = cleaned.find("{")
     end = cleaned.rfind("}")
     if start != -1 and end != -1 and end > start:
