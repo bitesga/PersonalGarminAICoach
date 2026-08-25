@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 from dataclasses import dataclass
 from pathlib import Path
 import argparse
@@ -520,27 +521,71 @@ class GroqCoachClient:
             temperature=0.2,
             max_tokens=450,
         )
-        content = response.choices[0].message.content if response.choices else ""
+        message = response.choices[0].message if response.choices else None
+        content = getattr(message, "content", "") if message is not None else ""
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for part in content:
+                if isinstance(part, dict):
+                    text = part.get("text")
+                    if isinstance(text, str) and text.strip():
+                        text_parts.append(text)
+                elif isinstance(part, str) and part.strip():
+                    text_parts.append(part)
+            content = "\n".join(text_parts)
+        elif not isinstance(content, str):
+            content = str(content or "")
         return type("GroqTextResponse", (), {"text": content or ""})()
 
 
 def _extract_json_response(response_text: str) -> dict[str, Any]:
     cleaned = response_text.strip()
+    if not cleaned:
+        raise ValueError("EMPTY_RESPONSE_FROM_PROVIDER")
+
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`").strip()
         if cleaned.startswith("json"):
             cleaned = cleaned[4:].strip()
 
-    try:
-        parsed = json.loads(cleaned)
-        return parsed if isinstance(parsed, dict) else {"raw": parsed}
-    except json.JSONDecodeError:
-        start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            parsed = json.loads(cleaned[start : end + 1])
+    candidates = [cleaned]
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidates.append(cleaned[start : end + 1])
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+
+        try:
+            parsed = json.loads(candidate)
             return parsed if isinstance(parsed, dict) else {"raw": parsed}
-        raise
+        except json.JSONDecodeError:
+            pass
+
+        # Accept Python-dict style responses (single quotes/True/False/None)
+        try:
+            parsed_literal = ast.literal_eval(candidate)
+            if isinstance(parsed_literal, dict):
+                return parsed_literal
+        except (SyntaxError, ValueError):
+            pass
+
+        # Last resort: fix common trailing-comma issues and retry strict JSON parsing
+        repaired = re.sub(r",\s*([}\]])", r"\1", candidate)
+        if repaired != candidate:
+            try:
+                parsed = json.loads(repaired)
+                return parsed if isinstance(parsed, dict) else {"raw": parsed}
+            except json.JSONDecodeError:
+                pass
+
+    snippet = cleaned[:160].replace("\n", " ")
+    raise ValueError(f"UNPARSEABLE_MODEL_OUTPUT: {snippet}")
 
 
 def _is_retryable_provider_error(exc: Exception) -> bool:
@@ -556,6 +601,8 @@ def _is_retryable_provider_error(exc: Exception) -> bool:
         "DEADLINE_EXCEEDED",
         "INTERNAL",
         "EXPECTING VALUE",
+        "EMPTY_RESPONSE_FROM_PROVIDER",
+        "UNPARSEABLE_MODEL_OUTPUT",
         "RATE LIMIT",
     ]
     return any(marker in message for marker in retry_markers)
