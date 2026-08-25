@@ -519,7 +519,6 @@ class GroqCoachClient:
             ],
             temperature=0.2,
             max_tokens=450,
-            response_format={"type": "json_object"},
         )
         content = response.choices[0].message.content if response.choices else ""
         return type("GroqTextResponse", (), {"text": content or ""})()
