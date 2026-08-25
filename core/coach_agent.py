@@ -24,7 +24,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 PROMPT_ASSETS_PATH = DATA_DIR / "coach_examples.json"
 LLM_RAW_LOG_PATH = DATA_DIR / "llm_raw_responses.log"
-DEFAULT_GROQ_MODEL_NAME = "llama-3.3-70b-versatile"
+DEFAULT_GROQ_MODEL_NAME = "openai/gpt-oss-120b"
 CACHE_TTL_HOURS = 6
 # If Body Battery drops under this threshold, recommend an explicit full rest day (Rest Day)
 REST_DAY_BODY_BATTERY_THRESHOLD = 35
