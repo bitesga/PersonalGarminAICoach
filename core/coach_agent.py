@@ -25,7 +25,7 @@ DATA_DIR = Path(__file__).resolve().parents[1] / "data"
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 PROMPT_ASSETS_PATH = DATA_DIR / "coach_examples.json"
 LLM_RAW_LOG_PATH = DATA_DIR / "llm_raw_responses.log"
-DEFAULT_GROQ_MODEL_NAME = "openai/gpt-oss-120b"
+DEFAULT_GROQ_MODEL_NAME = "qwen/qwen3-32b"
 CACHE_TTL_HOURS = 6
 # If Body Battery drops under this threshold, recommend an explicit full rest day (Rest Day)
 REST_DAY_BODY_BATTERY_THRESHOLD = 35
@@ -510,7 +510,7 @@ class GroqCoachClient:
 
     @staticmethod
     def _fallback_models() -> list[str]:
-        raw = os.getenv("GROQ_FALLBACK_MODELS", "openai/gpt-oss-20b")
+        raw = os.getenv("GROQ_FALLBACK_MODELS", "openai/gpt-oss-120b,openai/gpt-oss-20b")
         return [item.strip() for item in raw.split(",") if item.strip()]
 
     @staticmethod
@@ -915,7 +915,7 @@ def get_coach_recommendation(
     daily_stats: dict[str, Any] | None = None,
     activities: list[dict[str, Any]] | None = None,
     refresh: bool = False,
-    model_name: str = DEFAULT_GROQ_MODEL_NAME,
+    model_name: str | None = None,
     user_id: str | None = None,
     weather: dict[str, Any] | None = None,
     language: str = "en",
@@ -954,15 +954,19 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--preference", default="Prefers to train outdoors", help="Training preference")
     parser.add_argument("--goal", default="Maintain maximum strength and endurance", help="Training goal")
     parser.add_argument("--run-model", action="store_true", help="Call Groq directly")
-    parser.add_argument("--model", default=DEFAULT_GROQ_MODEL_NAME, help="Groq model name")
+    parser.add_argument(
+        "--model",
+        default=os.getenv("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL_NAME,
+        help="Groq model name",
+    )
     parser.add_argument("--refresh", action="store_true", help="Ignore the cache and request a new recommendation")
     return parser.parse_args()
 
 
-def _build_client(model_name: str) -> Any:
+def _build_client(model_name: str | None) -> Any:
     groq_api_key = os.getenv("GROQ_CLOUD_KEY", "").strip()
     if groq_api_key:
-        selected_model = model_name or DEFAULT_GROQ_MODEL_NAME
+        selected_model = model_name or os.getenv("GROQ_MODEL", "").strip() or DEFAULT_GROQ_MODEL_NAME
         return GroqCoachClient(api_key=groq_api_key, model_name=selected_model)
 
     return None
