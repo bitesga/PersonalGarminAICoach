@@ -508,21 +508,20 @@ class GroqCoachClient:
         self._client = Groq(api_key=api_key)
         self._model_name = model_name
 
-    def generate_content(self, prompt: str) -> Any:
-        response = self._client.chat.completions.create(
-            model=self._model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": COACH_SYSTEM_PROMPT,
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            max_tokens=450,
-        )
-        message = response.choices[0].message if response.choices else None
-        content = getattr(message, "content", "") if message is not None else ""
+    @staticmethod
+    def _fallback_models() -> list[str]:
+        raw = os.getenv("GROQ_FALLBACK_MODELS", "openai/gpt-oss-20b, llama-3.1-8b-instant")
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @staticmethod
+    def _extract_message_text(message: Any) -> str:
+        if message is None:
+            return ""
+
+        content = getattr(message, "content", "")
+        if isinstance(content, str):
+            return content
+
         if isinstance(content, list):
             text_parts: list[str] = []
             for part in content:
@@ -532,10 +531,49 @@ class GroqCoachClient:
                         text_parts.append(text)
                 elif isinstance(part, str) and part.strip():
                     text_parts.append(part)
-            content = "\n".join(text_parts)
-        elif not isinstance(content, str):
-            content = str(content or "")
-        return type("GroqTextResponse", (), {"text": content or ""})()
+            if text_parts:
+                return "\n".join(text_parts)
+
+        tool_calls = getattr(message, "tool_calls", None)
+        if isinstance(tool_calls, list):
+            for call in tool_calls:
+                function_obj = getattr(call, "function", None)
+                arguments = getattr(function_obj, "arguments", None)
+                if isinstance(arguments, str) and arguments.strip():
+                    return arguments
+
+        return ""
+
+    def generate_content(self, prompt: str) -> Any:
+        model_candidates = [self._model_name] + [m for m in self._fallback_models() if m != self._model_name]
+        last_error: Exception | None = None
+
+        for candidate_model in model_candidates:
+            try:
+                response = self._client.chat.completions.create(
+                    model=candidate_model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": COACH_SYSTEM_PROMPT,
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=450,
+                )
+                message = response.choices[0].message if response.choices else None
+                content = self._extract_message_text(message).strip()
+                if content:
+                    return type("GroqTextResponse", (), {"text": content, "model": candidate_model})()
+                last_error = ValueError(f"EMPTY_RESPONSE_FROM_PROVIDER model={candidate_model}")
+            except Exception as exc:
+                last_error = exc
+                continue
+
+        if last_error is not None:
+            raise last_error
+        raise ValueError("EMPTY_RESPONSE_FROM_PROVIDER")
 
 
 def _extract_json_response(response_text: str) -> dict[str, Any]:
@@ -837,6 +875,9 @@ def generate_coach_recommendation(
             
             recommendation["source"] = "model"
             recommendation["model_attempt"] = attempt
+            model_used = getattr(response, "model", None)
+            if model_used:
+                recommendation["model_used"] = str(model_used)
             recommendation["language"] = language
             _save_cached_recommendation(recommendation, user_id=user_id)
             return recommendation
